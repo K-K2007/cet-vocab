@@ -9251,7 +9251,16 @@ function sampleBook(arr, n) {
   return out;
 }
 
-const BOOK_VER = 4;
+/* Fisher-Yates 洗牌：内置词书乱序，避免按字母序背词 */
+function shuffleArr(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+  return arr;
+}
+
+const BOOK_VER = 5;
 const BUILTIN_BOOKS = [
   { id: "cet4-core",      name: "四级核心词汇",       words: sampleBook(CET4_POOL, 1000) },
   { id: "cet4-emergency", name: "四级高频应急词汇",   words: sampleBook(CET4_POOL, 400) },
@@ -9263,7 +9272,7 @@ const BUILTIN_BOOKS = [
   { id: "cet6-syllabus",  name: "六级考纲词汇",       words: CET6_FULL },
   { id: "kaoyan-core",    name: "考研考纲词汇核心版", words: KY_FULL },
   { id: "demo-cet",       name: "四六级高频演示词书", words: DEMO_WORDS }
-].map(d => Object.assign({}, d, { builtIn: true, ver: BOOK_VER, createdAt: 0 }));
+].map(d => Object.assign({}, d, { builtIn: true, ver: BOOK_VER, createdAt: 0, words: shuffleArr(d.words.slice()) }));
 
 /* ================= 导入词书弹窗 ================= */
 const importModal = document.getElementById("importModal");
