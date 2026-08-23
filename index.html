@@ -1508,12 +1508,14 @@ function buildQueue(force) {
 
 /* ================= TTS（M5：英美音切换） ================= */
 let voicesCache = [];
+const TTS_OK = "speechSynthesis" in window;
+let ttsUnlocked = false;
 function refreshVoices() {
-  if (!("speechSynthesis" in window)) return;
+  if (!TTS_OK) return;
   voicesCache = speechSynthesis.getVoices();
 }
 refreshVoices();
-if ("speechSynthesis" in window && typeof speechSynthesis.addEventListener === "function") {
+if (TTS_OK && typeof speechSynthesis.addEventListener === "function") {
   speechSynthesis.addEventListener("voiceschanged", refreshVoices);
 }
 function pickVoice() {
@@ -1524,11 +1526,29 @@ function pickVoice() {
   const want = settings.accent === "us" ? "en-us" : "en-gb";
   return en.find(v => norm(v) === want) || en.find(v => norm(v).startsWith("en")) || en[0];
 }
+
+/* 移动端解锁：iOS/Android 要求首次 speak() 发生在用户手势内，
+   之后 setTimeout 触发的自动朗读才被允许。首次任意触摸/点击时静默朗读一次。 */
+function unlockTTS() {
+  if (!TTS_OK || ttsUnlocked) return;
+  ttsUnlocked = true;
+  try {
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    u.lang = "en-US";
+    speechSynthesis.speak(u);
+  } catch (e) { /* 忽略 */ }
+}
+document.addEventListener("touchend", unlockTTS, { once: true, passive: true });
+document.addEventListener("click", unlockTTS, { once: true, passive: true });
+document.addEventListener("keydown", unlockTTS, { once: true });
+
 let activeUtterance = null;   // iOS Safari：utterance 需全局引用，否则会被 GC 中断朗读
 function speak(text, isSentence) {
-  if (!("speechSynthesis" in window)) return;
+  if (!TTS_OK) { ttsUnsupportedHint(); return; }
   speechSynthesis.cancel();
   requestAnimationFrame(() => {
+    try { speechSynthesis.resume(); } catch (e) { /* iOS 切后台后可能卡在 paused */ }
     const u = new SpeechSynthesisUtterance(text);
     const v = pickVoice();
     if (v) { u.voice = v; u.lang = v.lang; }
@@ -1539,7 +1559,40 @@ function speak(text, isSentence) {
     u.onend = u.onerror = () => { activeUtterance = null; };
     activeUtterance = u;
     speechSynthesis.speak(u);
+    // iOS 偶发静默失败（cancel 后队列卡死）：稍后检查，未开始则重试一次
+    setTimeout(() => {
+      if (activeUtterance === u && !speechSynthesis.speaking && !speechSynthesis.pending) {
+        try {
+          speechSynthesis.resume();
+          speechSynthesis.speak(u);
+        } catch (e) { /* 忽略 */ }
+      }
+    }, 400);
   });
+}
+let ttsHintShown = false;
+function ttsUnsupportedHint() {
+  if (ttsHintShown) return;
+  ttsHintShown = true;
+  try {
+    const tip = document.createElement("div");
+    tip.textContent = "当前浏览器不支持语音朗读，建议用 Safari / Chrome 打开";
+    tip.setAttribute("role", "status");
+    Object.assign(tip.style, {
+      position: "fixed", left: "50%", bottom: "calc(24px + env(safe-area-inset-bottom, 0px))",
+      transform: "translateX(-50%)", zIndex: "300",
+      background: "rgba(45,58,46,.92)", color: "#faf8f5",
+      padding: "10px 18px", borderRadius: "999px", fontSize: "13px",
+      letterSpacing: "1px", pointerEvents: "none",
+      transition: "opacity .3s", opacity: "0"
+    });
+    document.body.appendChild(tip);
+    requestAnimationFrame(() => { tip.style.opacity = "1"; });
+    setTimeout(() => {
+      tip.style.opacity = "0";
+      setTimeout(() => tip.remove(), 350);
+    }, 2600);
+  } catch (e) { /* 忽略 */ }
 }
 function updateAccentNote() {
   const note = document.getElementById("accentNote");
