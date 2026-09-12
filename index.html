@@ -1118,9 +1118,9 @@ button:focus-visible, a:focus-visible {
     </div>
     <p class="accent-cap">朗读方式</p>
     <div class="accent-seg" role="group" aria-label="朗读方式">
-      <button id="ttsAuto" class="on">自动</button>
+      <button id="ttsAuto">自动</button>
       <button id="ttsSystem">系统语音</button>
-      <button id="ttsOnline">在线语音</button>
+      <button id="ttsOnline" class="on">在线语音</button>
     </div>
     <p class="accent-note" id="accentNote">朗读单词与例句时使用所选口音。</p>
   </div>
@@ -1369,7 +1369,7 @@ let state = {                   // 每日/统计状态
   stats: { known: 0, recalled: 0, revealed: 0, easy: 0 },
   firstDate: "", lastDate: "", streak: 1
 };
-let settings = { accent: "gb", dailyNew: 10, ttsEngine: "auto" };
+let settings = { accent: "gb", dailyNew: 10, ttsEngine: "online" };
 
 const BATCH = 10;
 const INTERVALS = [10*60e3, 3600e3, 6*3600e3, 864e5, 2*864e5, 4*864e5, 7*864e5, 15*864e5, 30*864e5];
@@ -1542,15 +1542,21 @@ function remoteTtsUrl(text) {
   return "https://dict.youdao.com/dictvoice?type=" + (settings.accent === "us" ? 2 : 1) +
          "&audio=" + encodeURIComponent(text);
 }
-function playRemote(text) {
+/* 例句用百度整句 TTS：有道 dictvoice 只支持单词，整句返回 500 */
+function sentenceTtsUrl(text) {
+  return "https://fanyi.baidu.com/gettts?lan=en&text=" + encodeURIComponent(text) + "&spd=3&source=web";
+}
+function playAudioSrc(src) {
   if (currentAudio) { try { currentAudio.pause(); } catch (e) { /* 忽略 */ } currentAudio = null; }
-  const a = new Audio(remoteTtsUrl(text));
+  const a = new Audio(src);
   a.setAttribute("playsinline", "");
   currentAudio = a;
   a.onerror = () => remoteFailHint();
   const p = a.play();
   if (p && p.catch) p.catch(() => remoteFailHint());
 }
+function playRemote(text) { playAudioSrc(remoteTtsUrl(text)); }
+function playSentenceOnline(text) { playAudioSrc(sentenceTtsUrl(text)); }
 function remoteFailHint() {
   showTtsToast("在线语音播放失败，请检查网络后重试");
 }
@@ -1579,12 +1585,22 @@ document.addEventListener("keydown", unlockTTS, { once: true });
 
 let activeUtterance = null;   // iOS Safari：utterance 需全局引用，否则会被 GC 中断朗读
 function speak(text, isSentence) {
-  const engine = settings.ttsEngine || "auto";
+  const engine = settings.ttsEngine || "online";
+  if (isSentence) {
+    // 例句：在线→百度整句；系统不可用则同样回落在线整句
+    if (engine === "online" || remoteOnly || !TTS_OK) { playSentenceOnline(text); return; }
+    speakSystem(text, true, engine);
+    return;
+  }
+  // 单词
   if (engine === "online" || remoteOnly) { playRemote(text); return; }
   if (!TTS_OK) {
     if (engine === "system") { showTtsToast("当前浏览器不支持系统语音，建议切换为在线语音"); return; }
     playRemote(text); return;
   }
+  speakSystem(text, false, engine);
+}
+function speakSystem(text, isSentence, engine) {
   speechSynthesis.cancel();
   requestAnimationFrame(() => {
     try { speechSynthesis.resume(); } catch (e) { /* iOS 切后台后可能卡在 paused */ }
@@ -1608,13 +1624,13 @@ function speak(text, isSentence) {
         } catch (e) { /* 忽略 */ }
       }
     }, 400);
-    // 自动模式看门狗：系统语音 1.5s 内从未出声（微信/国产 WebView 常见）→ 永久切换在线语音
+    // 自动模式看门狗：系统语音 1.5s 内从未出声（微信/国产 WebView 常见）→ 永久切换在线
     if (engine === "auto") {
       setTimeout(() => {
         if (!systemTtsWorked && activeUtterance === u) {
           remoteOnly = true;
           try { speechSynthesis.cancel(); } catch (e) { /* 忽略 */ }
-          playRemote(text);
+          if (isSentence) playSentenceOnline(text); else playRemote(text);
           updateAccentNote();
         }
       }, 1500);
@@ -1648,8 +1664,8 @@ function showTtsToast(msg) {
 function updateAccentNote() {
   const note = document.getElementById("accentNote");
   if (!voicesCache.length) refreshVoices();
-  const engine = settings.ttsEngine || "auto";
-  if (engine === "online") { note.textContent = "在线语音朗读（需联网）。"; return; }
+  const engine = settings.ttsEngine || "online";
+  if (engine === "online") { note.textContent = "在线语音朗读：单词有道 · 例句百度（需联网）。"; return; }
   if (!TTS_OK) {
     note.textContent = engine === "system"
       ? "当前浏览器不支持系统语音，建议切换为在线语音。"
@@ -1888,7 +1904,7 @@ function updateProfileData() {
 function updateAccentUI() {
   document.getElementById("accentGb").classList.toggle("on", settings.accent === "gb");
   document.getElementById("accentUs").classList.toggle("on", settings.accent === "us");
-  const engine = settings.ttsEngine || "auto";
+  const engine = settings.ttsEngine || "online";
   document.getElementById("ttsAuto").classList.toggle("on", engine === "auto");
   document.getElementById("ttsSystem").classList.toggle("on", engine === "system");
   document.getElementById("ttsOnline").classList.toggle("on", engine === "online");
@@ -9409,7 +9425,7 @@ document.getElementById("fileBackup").addEventListener("change", e => {
         }
       }
       state = data.state || { date: todayStr(), todayLearned: [], todayNew: 0, stats: { known: 0, recalled: 0, revealed: 0, easy: 0 }, firstDate: todayStr(), lastDate: todayStr(), streak: 1 };
-      settings = Object.assign({ accent: "gb", dailyNew: 10, ttsEngine: "auto" }, data.settings || {});
+      settings = Object.assign({ accent: "gb", dailyNew: 10, ttsEngine: "online" }, data.settings || {});
       await dbPut("meta", { k: "state", v: state });
       await dbPut("meta", { k: "settings", v: settings });
       setActiveBook(data.activeBookId && books.some(b => b.id === data.activeBookId) ? data.activeBookId : books[0].id);
@@ -9781,7 +9797,8 @@ document.addEventListener("keydown", e => {
   } else {
     state = { date: todayStr(), todayLearned: [], todayNew: 0, stats: { known: 0, recalled: 0, revealed: 0, easy: 0 }, firstDate: todayStr(), lastDate: todayStr(), streak: 1 };
   }
-  if (metaMap.has("settings")) settings = Object.assign({ accent: "gb", dailyNew: 10, ttsEngine: "auto" }, metaMap.get("settings"));
+  if (metaMap.has("settings")) settings = Object.assign({ accent: "gb", dailyNew: 10, ttsEngine: "online" }, metaMap.get("settings"));
+  if (settings.ttsEngine === "auto") { settings.ttsEngine = "online"; saveSettings(); }  // 旧默认迁移为在线
   const progressRows = await dbAll("progress");
   progress = {};
   for (const row of progressRows) progress[row.word] = { lv: row.lv, due: row.due, wrong: row.wrong, lastAt: row.lastAt };
