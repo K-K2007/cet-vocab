@@ -1,0 +1,25 @@
+main:
+  push:
+  - stages:
+    - name: notify
+      image: cnbcool/webhook
+      settings:
+        urls:
+          - https://api.edgeone.ai/eo/pages/hook/cnb
+        method: POST
+        content_type: application/json
+        debug: true
+        template: |
+          {
+            "repoName": "{{ CNB_REPO_NAME }}",
+            "repoUrl": "{{ CNB_REPO_URL_HTTPS }}",
+            "branch": "{{ CNB_BRANCH }}",
+            "commit": "{{ CNB_COMMIT_SHORT }}",
+            "commitMessage": "{{ CNB_COMMIT_MESSAGE }}",
+            "committer": "{{ CNB_COMMITTER }}",
+            "event": "{{ CNB_EVENT }}",
+            "buildId": "{{ CNB_BUILD_ID }}",
+            "buildWebUrl": "{{ CNB_BUILD_WEB_URL }}",
+            "buildUser": "{{ CNB_BUILD_USER }}",
+            "pipelineName": "{{ CNB_PIPELINE_NAME }}"
+          }
