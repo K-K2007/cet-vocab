@@ -10500,7 +10500,7 @@ function dtw(a, b) {
 /* ---- 示范朗读（TTS，仅供对照参考）：英文走应用内引擎，中文自动用中文语音 ---- */
 function speakLine(text) {
   if (!text) return;
-  if (/[\u4e00-\u9fff]/.test(text)) { speakLineZh(text); return; }
+  if (/[一-鿿]/.test(text)) { speakLineZh(text); return; }
   speak(text, true);
 }
 function speakLineZh(text) {
@@ -10695,8 +10695,9 @@ function seekTo(t) {
     const finish = () => {
       if (settled) return;
       settled = true;
-      // seeked 之后等两帧再 resolve，否则 drawImage 可能拿到上一位置的画面
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
+      // seeked 之后等两帧再 resolve，否则 drawImage 可能拿到上一位置的画面；
+      // 用定时器而非 rAF：后台/低活跃标签页 rAF 会冻结，识别将永远卡住
+      setTimeout(() => setTimeout(resolve, 32), 32);
     };
     const timer = setTimeout(finish, 2500);
     videoEl.addEventListener("seeked", finish);
@@ -10706,7 +10707,7 @@ function seekTo(t) {
 function cleanOcrText(t) {
   let s = String(t || "").replace(/\s+/g, " ").trim();
   if (!s) return "";
-  if ((s.match(/[\u4e00-\u9fff]/g) || []).length >= 2) s = s.replace(/ /g, "");
+  if ((s.match(/[一-鿿]/g) || []).length >= 2) s = s.replace(/ /g, "");
   return s.replace(/^[-–—•·]+/, "").trim();
 }
 function levRatio(a, b) {
@@ -10725,7 +10726,7 @@ function levRatio(a, b) {
   return 1 - prev[n] / Math.max(m, n);
 }
 function sameLine(a, b) {
-  const norm = s => String(s).toLowerCase().replace(/[^\u4e00-\u9fff\w]+/g, "");
+  const norm = s => String(s).toLowerCase().replace(/[^一-鿿\w]+/g, "");
   const x = norm(a), y = norm(b);
   if (!x || !y) return false;
   return x === y || levRatio(x, y) >= 0.82;
@@ -10906,22 +10907,43 @@ async function runOcr() {
       if (meanLum < 128) for (let i = 0; i < dd.length; i += 4) dd[i] = dd[i + 1] = dd[i + 2] = 255 - dd[i];
       octx.putImageData(img, 0, 0);
       const res = await ocrWorker.recognize(ocrC, {}, { blocks: true, text: true });
-      const imgConf = Math.round(res.data.confidence || 0);
-      // 词级过滤：贴左右边缘 12% 的词多为被裁进带内的水印/台标，剔除后按位置重组文本
-      const rawWords = [];
+      // 乱码净化：保留行结构逐行重组——全局拍平按 x 排序会把幻觉行的词插进真字幕句子中间；
+      // 低置信、纯符号、孤立字母、噪声形态的全大写串逐词剔除；绝不用未过滤的 res.data.text 回退。
+      const lineTexts = [];
+      const keptConfs = [];
       for (const block of res.data.blocks || []) {
         for (const par of block.paragraphs || []) {
           for (const line of par.lines || []) {
-            for (const w of line.words || []) rawWords.push(w);
+            const words = line.words || [];
+            const mixedCase = words.some(w => /[a-z]/.test(String(w.text || "")));
+            const arr = [];
+            for (const w of words) {
+              const t = String(w.text || "").trim();
+              if (!t) continue;
+              if (w.bbox) {
+                const cx = (w.bbox.x0 + w.bbox.x1) / 2 / ocrC.width;
+                if (cx < 0.12 || cx > 0.88) continue;                    // 贴边词：水印/台标
+              }
+              const wc = typeof w.confidence === "number" && w.confidence >= 0 ? w.confidence : null;
+              if (wc != null && wc < 55) continue;                        // 低置信：纹理噪声幻觉
+              if (!/[A-Za-z0-9一-鿿]/.test(t)) continue;              // 纯符号/标点碎片
+              if (/^[A-Za-z]$/.test(t) && !/^[aAiI]$/.test(t)) continue;  // 孤立单字母（a/I 是真词）
+              // 混排行里的超长全大写串多为噪声；清晰的大写强调词置信度高，放行
+              if (mixedCase && /^[A-Z]{6,}$/.test(t) && !(wc != null && wc >= 75)) continue;
+              arr.push(t);
+              if (wc != null) keptConfs.push(wc);
+            }
+            if (!arr.length) continue;
+            if (arr.length >= 3 && /^[A-Z][a-z]$/.test(arr[arr.length - 1])) arr.pop();  // 句尾两字母碎片
+            if (arr.length === 1 && /^[A-Z]{6,}$/.test(arr[0])) continue;                // 整行全大写串＝幻觉行
+            const lineText = cleanOcrText(arr.join(" "));
+            if (lineText) lineTexts.push({ text: lineText, y: line.bbox ? line.bbox.y0 : 1e9 });
           }
         }
       }
-      const keptWords = rawWords.filter(w => {
-        if (!w.bbox) return true;
-        const cx = (w.bbox.x0 + w.bbox.x1) / 2 / ocrC.width;
-        return cx >= 0.12 && cx <= 0.88;
-      }).sort((a, b) => (a.bbox ? a.bbox.x0 : 0) - (b.bbox ? b.bbox.x0 : 0));
-      const text = cleanOcrText(keptWords.map(w => w.text).join(" ") || res.data.text);
+      lineTexts.sort((a, b) => a.y - b.y);
+      const text = cleanOcrText(lineTexts.map(x => x.text).join(" "));
+      const imgConf = keptConfs.length ? Math.round(keptConfs.reduce((a, b) => a + b, 0) / keptConfs.length) : Math.round(res.data.confidence || 0);
       if (text) {
         if (cur && sameLine(cur.text, text)) { cur.confs.push(imgConf); }
         else {
