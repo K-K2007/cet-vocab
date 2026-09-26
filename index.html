@@ -284,6 +284,11 @@ button:focus-visible, a:focus-visible {
 .wl-word { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .wl-mean { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
 .wl-badge { flex-shrink: 0; font-size: 10px; letter-spacing: 1px; padding: 1px 7px; border-radius: 5px; background: var(--light); color: var(--ink-3); white-space: nowrap; }
+.wl-badge.star { background: var(--accent-soft); color: var(--accent); }
+.wl-controls { display: grid; gap: 10px; margin-bottom: 14px; }
+.wl-controls[hidden] { display: none; }
+.wl-controls .accent-seg button { min-height: 36px; font-size: 12px; letter-spacing: 1px; }
+.wl-controls .book-select { min-height: 38px; }
 .profile-section { margin-bottom: 18px; }
 .profile-section-title {
   font-size: 11px;
@@ -1102,6 +1107,13 @@ button:focus-visible, a:focus-visible {
       </button>
       <div class="wl-title" id="wlTitle">单词列表</div>
     </div>
+    <div class="wl-controls" id="wlControls" hidden>
+      <select class="book-select" id="wlBook" aria-label="选择词书"></select>
+      <div class="accent-seg" id="wlTabs" role="group" aria-label="已学与未学切换">
+        <button data-tab="learned" class="on">已学</button>
+        <button data-tab="unlearned">未学</button>
+      </div>
+    </div>
     <div class="wl-scroll" id="wlBody"></div>
   </div>
   <div id="profileMain">
@@ -1114,6 +1126,7 @@ button:focus-visible, a:focus-visible {
     </div>
     <div class="profile-stats">
       <div class="pstat link" id="statTotalBox" role="button" tabindex="0"><div class="pstat-num" id="statTotal">0</div><div class="pstat-label">已学单词</div></div>
+      <div class="pstat link" id="statUnlearnedBox" role="button" tabindex="0"><div class="pstat-num" id="statUnlearned">0</div><div class="pstat-label">未学单词</div></div>
       <div class="pstat link" id="statTodayBox" role="button" tabindex="0"><div class="pstat-num" id="statToday">0</div><div class="pstat-label">今日已学</div></div>
       <div class="pstat"><div class="pstat-num" id="statStreak">1</div><div class="pstat-label">连续天数</div></div>
       <div class="pstat"><div class="pstat-num" id="statAccuracy">—</div><div class="pstat-label">正确率</div></div>
@@ -1931,43 +1944,113 @@ function closeWordList() {
   wlView.classList.remove("open");
   profileMain.style.display = "";
 }
-function wordMean(word) {
-  const w = wordMap.get(word);
+function findEntryAnywhere(word) {
+  for (const b of books) {
+    const hit = b.words.find(x => x.word === word);
+    if (hit) return hit;
+  }
+  return null;
+}
+function entryMean(w) {
   if (!w) return "";
   const s = getSenses(w)[0];
   return s ? (s.pos ? s.pos + " " : "") + s.cn : "";
 }
+function wordMean(word) { return entryMean(wordMap.get(word) || findEntryAnywhere(word)); }
+
+/* ---- 词典统计视图状态：选择词书 + 已学/未学切换 ---- */
+let wlBookId = "";
+let wlTab = "learned";
+
 function openWordList(kind) {
+  if (kind === "total" || kind === "unlearned") {
+    wlBookId = activeBookId;
+    openBookWords(kind === "total" ? "learned" : "unlearned");
+    return;
+  }
+  document.getElementById("wlControls").hidden = true;
   let title = "", list = [];
-  if (kind === "total") {
-    title = "已学单词";
-    list = WORDS.filter(w => progress[w.word]).map(w => w.word);
-  } else if (kind === "today") {
+  if (kind === "today") {
     title = "今日已学";
     list = state.todayLearned.slice();
   } else {
     title = "待复习";
-    list = dueReviewWords();
+    list = dueReviewWords("all");   // 列表给全量到期词；降频只作用于日常任务的排程
   }
   document.getElementById("wlTitle").innerHTML = `${title} · <span class="wl-count">${list.length}</span> 词`;
   const body = document.getElementById("wlBody");
   if (!list.length) {
-    body.innerHTML = `<div class="wl-empty">${kind === "today" ? "今天还没有学习记录" : kind === "due" ? "没有到期需要复习的单词" : "还没有学过任何单词"}</div>`;
+    body.innerHTML = `<div class="wl-empty">${kind === "today" ? "今天还没有学习记录" : "没有到期需要复习的单词"}</div>`;
   } else {
     body.innerHTML = list.map(word => {
       const p = progress[word];
-      let badge = "";
+      const badges = [];
       if (kind !== "today" && p) {
         const lv = p.lv || 0;
-        badge = lv >= 6 ? "长期" : lv >= 3 ? "巩固" : "初期";
+        badges.push(`<span class="wl-badge">${lv >= 6 ? "长期" : lv >= 3 ? "巩固" : "初期"}</span>`);
       }
-      return `<div class="wl-item"><span class="wl-word">${esc(word)}</span><span class="wl-mean">${esc(wordMean(word))}</span>${badge ? `<span class="wl-badge">${badge}</span>` : ""}</div>`;
+      if (starred[word]) badges.push(`<span class="wl-badge star">生词本</span>`);
+      return `<div class="wl-item"><span class="wl-word">${esc(word)}</span><span class="wl-mean">${esc(wordMean(word))}</span>${badges.join("")}</div>`;
     }).join("");
   }
   profileMain.style.display = "none";
   wlView.classList.add("open");
 }
-for (const [id, kind] of [["statTotalBox", "total"], ["statTodayBox", "today"], ["statDueBox", "due"]]) {
+
+/* 词典统计：选一本书，看它已学 / 未学的单词（纯浏览，不切换当前学习词书） */
+function openBookWords(tab) {
+  wlTab = tab;
+  document.getElementById("wlControls").hidden = false;
+  profileMain.style.display = "none";
+  wlView.classList.add("open");
+  renderBookWords();
+}
+function renderBookWords() {
+  const body = document.getElementById("wlBody");
+  const book = books.find(b => b.id === wlBookId) || books[0];
+  if (!book) {
+    document.getElementById("wlBook").innerHTML = "";
+    document.getElementById("wlTitle").innerHTML = `单词统计 · <span class="wl-count">0</span> 词`;
+    body.innerHTML = `<div class="wl-empty">还没有可统计的词书</div>`;
+    return;
+  }
+  wlBookId = book.id;
+  document.getElementById("wlBook").innerHTML = books.map(b =>
+    `<option value="${esc(b.id)}" ${b.id === book.id ? "selected" : ""}>${esc(b.name)}（${b.words.length} 词）</option>`
+  ).join("");
+  const learned = [], unlearned = [];
+  for (const w of book.words) (progress[w.word] ? learned : unlearned).push(w);
+  const list = wlTab === "learned" ? learned : unlearned;
+  document.getElementById("wlTitle").innerHTML = `${esc(book.name)} · <span class="wl-count">${list.length}</span> 词`;
+  for (const b of document.querySelectorAll("#wlTabs [data-tab]")) {
+    b.classList.toggle("on", b.dataset.tab === wlTab);
+    b.textContent = b.dataset.tab === "learned" ? `已学 ${learned.length}` : `未学 ${unlearned.length}`;
+  }
+  if (!list.length) {
+    body.innerHTML = `<div class="wl-empty">${wlTab === "learned" ? "这本书还没有已学的单词" : "这本书的单词已全部学过"}</div>`;
+    return;
+  }
+  body.innerHTML = list.map(w => {
+    const badges = [];
+    if (wlTab === "learned") {
+      const lv = (progress[w.word] || {}).lv || 0;
+      badges.push(`<span class="wl-badge">${lv >= 6 ? "长期" : lv >= 3 ? "巩固" : "初期"}</span>`);
+    }
+    if (starred[w.word]) badges.push(`<span class="wl-badge star">生词本</span>`);
+    return `<div class="wl-item"><span class="wl-word">${esc(w.word)}</span><span class="wl-mean">${esc(entryMean(w))}</span>${badges.join("")}</div>`;
+  }).join("");
+}
+document.getElementById("wlBook").addEventListener("change", e => {
+  wlBookId = e.target.value;
+  renderBookWords();
+});
+document.getElementById("wlTabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]");
+  if (!b || b.dataset.tab === wlTab) return;
+  wlTab = b.dataset.tab;
+  renderBookWords();
+});
+for (const [id, kind] of [["statTotalBox", "total"], ["statUnlearnedBox", "unlearned"], ["statTodayBox", "today"], ["statDueBox", "due"]]) {
   const el = document.getElementById(id);
   el.addEventListener("click", () => openWordList(kind));
   el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openWordList(kind); } });
@@ -2030,6 +2113,7 @@ function updateProfileData() {
     }
   }
   document.getElementById("statTotal").textContent = WORDS.filter(w => progress[w.word]).length;
+  document.getElementById("statUnlearned").textContent = WORDS.filter(w => !progress[w.word]).length;
   document.getElementById("statToday").textContent = state.todayLearned.length;
   document.getElementById("statStreak").textContent = state.streak;
   document.getElementById("statAccuracy").textContent = accuracy;
