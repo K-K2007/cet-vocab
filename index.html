@@ -10052,7 +10052,7 @@ async function loadRefAudio(file) {
     else { refSamples = null; refLoadMsg = "未解析到有效音轨（视频可能没有声音），跟读评分不可用。"; setVideoHint(refLoadMsg); }
   } catch (err) {
     refSamples = null;
-    refLoadMsg = "未能解析该视频的音轨（浏览器不支持此音频编码），跟读评分不可用；仍可听原声与用示范朗读对照。";
+    refLoadMsg = "未能解析该视频的音轨：视频可能没有声音，或音轨编码不受浏览器支持（如 AC3/DTS 音轨、MKV 容器）。可换 mp4（H.264/AAC）或 webm 格式；仍可看画面、听原声（若浏览器可播）与用示范朗读对照。";
     setVideoHint(refLoadMsg);
   }
 }
