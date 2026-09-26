@@ -1026,6 +1026,56 @@ button:focus-visible, a:focus-visible {
 }
 .wl-clear-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
+/* ================= 视频配音 ================= */
+.btn-hero.ghost {
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+  font-weight: 500;
+}
+.btn-hero.ghost:hover { background: #fff; color: var(--green); border-color: var(--green); box-shadow: 0 8px 22px rgba(45,58,46,.12); }
+.video-wrap {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding: calc(92px + var(--safe-top)) 16px calc(40px + var(--safe-bottom));
+  width: 100%;
+}
+.video-card {
+  width: 100%;
+  max-width: 880px;
+  height: fit-content;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow-md);
+  padding: 22px;
+}
+.video-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.video-title { font-family: var(--serif); font-size: 19px; font-weight: 700; letter-spacing: 1px; }
+.video-file { font-size: 12px; color: var(--ink-3); }
+.video-player { width: 100%; display: block; border-radius: 14px; background: #10140f; aspect-ratio: 16 / 9; }
+.video-tools { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.video-tools .mini-btn { flex: 0 0 auto; padding: 0 18px; }
+.video-score { margin-left: auto; font-family: var(--serif); font-size: 14px; font-weight: 700; color: var(--green); }
+.video-hint { margin-top: 10px; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+.dub-panel { margin-top: 14px; padding: 14px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--cream); }
+.dub-panel[hidden] { display: none; }
+.dub-line { margin-bottom: 10px; font-size: 14px; line-height: 1.7; color: var(--ink); }
+.dub-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.dub-actions .mini-btn { flex: 0 0 auto; padding: 0 16px; }
+.dub-result { margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.dub-result b { font-family: var(--serif); font-size: 19px; color: var(--green); }
+.sub-score { flex-shrink: 0; align-self: center; font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--green); }
+.sub-item.sel { background: var(--light); }
+.sub-item.on { background: var(--accent-soft); }
+.sub-list { margin-top: 12px; max-height: 320px; overflow-y: auto; border-top: 1px dashed var(--line); }
+.sub-item { display: flex; gap: 10px; padding: 9px 6px; border-bottom: 1px dashed var(--line); cursor: pointer; border-radius: 8px; }
+.sub-item:hover { background: var(--light); }
+.sub-time { flex-shrink: 0; padding-top: 2px; font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--ink-3); }
+.sub-text { font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+.sub-item.on .sub-text { color: var(--ink); }
+
 /* ================= 响应式 ================= */
 @media (max-width: 640px) {
   .topbar-inner { height: 60px; padding: 0 16px; }
@@ -1224,9 +1274,41 @@ button:focus-visible, a:focus-visible {
   </div>
 </div>
 
+<!-- 视频配音页 -->
+<main class="stage" id="videoStage" style="display:none;">
+  <div class="video-wrap">
+    <div class="video-card">
+      <div class="video-head">
+        <div class="video-title">视频配音 · 跟读评分</div>
+        <div class="video-file" id="videoFileName">未导入视频</div>
+        <div class="video-score" id="videoScore"></div>
+      </div>
+      <video class="video-player" id="videoEl" controls playsinline preload="metadata"></video>
+      <div class="video-tools">
+        <button class="mini-btn primary" id="btnPickVideo">导入视频</button>
+        <button class="mini-btn" id="btnPickSub">导入字幕</button>
+      </div>
+      <p class="video-hint" id="videoHint">导入视频后自动检测内嵌字幕；没有内嵌字幕就再导入配套的 .srt / .vtt 字幕文件。点字幕选一句 → 听原声 → 录音跟读，系统会给出与原声的相似度评分。</p>
+      <div class="dub-panel" id="dubPanel" hidden>
+        <div class="dub-line" id="dubLine"></div>
+        <div class="dub-actions">
+          <button class="mini-btn" id="btnPlayLine">听原声</button>
+          <button class="mini-btn" id="btnDemoLine">示范朗读</button>
+          <button class="mini-btn primary" id="btnRecord">录音跟读</button>
+          <button class="mini-btn" id="btnNextLine">下一句</button>
+        </div>
+        <div class="dub-result" id="dubResult"></div>
+      </div>
+      <div class="sub-list" id="subList"></div>
+    </div>
+  </div>
+</main>
+
 <!-- 隐藏文件输入 -->
 <input type="file" id="fileCsv" accept=".csv,.txt,.tsv" hidden>
 <input type="file" id="fileBackup" accept=".json" hidden>
+<input type="file" id="fileVideo" accept="video/*" hidden>
+<input type="file" id="fileSub" accept=".srt,.vtt,text/vtt" hidden>
 
 <!-- 进入页 -->
 <main class="stage" id="welcomeStage">
@@ -1268,6 +1350,10 @@ button:focus-visible, a:focus-visible {
       <button class="btn-hero star-hero-btn" id="btnStarTestHero" aria-label="生词本：查看与测试">
         生词本（<span class="star-count">0</span>）
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17.75 5.53 21l1.23-6.88L2 9.26l6.91-.95L12 2l3.09 6.31 6.91.95-4.76 4.86L18.47 21z"/></svg>
+      </button>
+      <button class="btn-hero ghost" id="btnVideo" aria-label="视频配音：导入视频自动配音">
+        视频配音
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="m10 9.5 5 2.5-5 2.5z"/></svg>
       </button>
       <span class="hero-note">按 Enter 也可开始</span>
     </div>
@@ -1662,9 +1748,9 @@ function remoteTtsUrl(text) {
   return "https://dict.youdao.com/dictvoice?type=" + (settings.accent === "us" ? 2 : 1) +
          "&audio=" + encodeURIComponent(text);
 }
-/* 例句用百度整句 TTS：有道 dictvoice 只支持单词，整句返回 500 */
-function sentenceTtsUrl(text) {
-  return "https://fanyi.baidu.com/gettts?lan=en&text=" + encodeURIComponent(text) + "&spd=3&source=web";
+/* 例句/台词用百度整句 TTS：有道 dictvoice 只支持单词，整句返回 500 */
+function sentenceTtsUrl(text, lang) {
+  return "https://fanyi.baidu.com/gettts?lan=" + (lang || "en") + "&text=" + encodeURIComponent(text) + "&spd=3&source=web";
 }
 function playAudioSrc(src) {
   if (currentAudio) { try { currentAudio.pause(); } catch (e) { /* 忽略 */ } currentAudio = null; }
@@ -1821,6 +1907,8 @@ const backHomeBtn = document.getElementById("backHomeBtn");
 function showWelcome(focusStart) {
   welcomeStage.style.display = "flex";
   studyStage.style.display = "none";
+  videoStage.style.display = "none";
+  leaveVideoStage();
   dayMeta.classList.remove("on");
   backHomeBtn.classList.remove("on");
   exitReviewSession(shownFromReview);
@@ -1841,6 +1929,8 @@ function showWelcome(focusStart) {
 function showStudy() {
   welcomeStage.style.display = "none";
   studyStage.style.display = "flex";
+  videoStage.style.display = "none";
+  leaveVideoStage();
   dayMeta.classList.add("on");
   backHomeBtn.classList.add("on");
   buildQueue();
@@ -9748,6 +9838,7 @@ document.getElementById("btnExportAll").addEventListener("click", async () => {
     progress: Object.keys(progress).map(w => ({ word: w, ...progress[w] })),
     starred: starWords().map(w => ({ word: w, addAt: starred[w].addAt })),
     dailyLog,
+    videoScores,
     state, settings, activeBookId
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -9800,6 +9891,8 @@ document.getElementById("fileBackup").addEventListener("change", e => {
       }
       dailyLog = data.dailyLog && typeof data.dailyLog === "object" ? data.dailyLog : {};
       await dbPut("meta", { k: "dailyLog", v: dailyLog });
+      videoScores = data.videoScores && typeof data.videoScores === "object" ? data.videoScores : {};
+      await dbPut("meta", { k: "videoScores", v: videoScores });
       state = data.state || { date: todayStr(), todayLearned: [], todayNew: 0, stats: { known: 0, recalled: 0, revealed: 0, easy: 0 }, firstDate: todayStr(), lastDate: todayStr(), streak: 1 };
       settings = Object.assign({ accent: "gb", dailyNew: 10, ttsEngine: "online" }, data.settings || {});
       await dbPut("meta", { k: "state", v: state });
@@ -9814,6 +9907,533 @@ document.getElementById("fileBackup").addEventListener("change", e => {
   };
   reader.readAsText(file, "UTF-8");
 });
+
+/* ================= 视频配音（跟读评分） =================
+   导入视频 → 字幕切句（内嵌轨或 .srt/.vtt）→ 用户逐句录音跟读，
+   系统用 MFCC 特征 + DTW 对齐计算与原声的相似度评分（分数越高越像原声）。
+   说明：比对的是「声音像不像」，不做语音识别、不判内容对错；纯离线在浏览器内完成。 */
+const videoStage = document.getElementById("videoStage");
+const videoEl = document.getElementById("videoEl");
+let videoObjUrl = null;
+let videoKey = "";              // 视频身份（文件名|大小），评分按视频持久化
+let cues = [];                  // [{ start, end, text }] 秒
+let cueIdx = -1;                // 播放中的句子（高亮）
+let selIdx = -1;                // 跟读选中的句子
+let refSamples = null;          // 原声 16kHz 单声道 PCM
+let videoScores = {};           // { 视频key: { "起始秒": 最高分 } }
+let audioCtx = null;
+let playUntil = null;           // 「听原声」自动停点
+let micStream = null, mediaRecorder = null, recChunks = [], recTimer = null, recIdx = -1, recCancelled = false;
+
+function setVideoHint(msg) { document.getElementById("videoHint").textContent = msg; }
+function stopVideoSpeech() {
+  try { speechSynthesis.cancel(); } catch (e) { /* 忽略 */ }
+  if (currentAudio) { try { currentAudio.pause(); } catch (e) { /* 忽略 */ } currentAudio = null; }
+}
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function fmtClock(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+
+function showVideoStage() {
+  welcomeStage.style.display = "none";
+  studyStage.style.display = "none";
+  videoStage.style.display = "flex";
+  dayMeta.classList.remove("on");
+  backHomeBtn.classList.add("on");
+}
+function leaveVideoStage() {
+  stopRecording(true);
+  if (videoEl && !videoEl.paused) videoEl.pause();
+  stopVideoSpeech();
+}
+document.getElementById("btnVideo").addEventListener("click", showVideoStage);
+
+/* ---- 导入视频 ---- */
+document.getElementById("btnPickVideo").addEventListener("click", () => document.getElementById("fileVideo").click());
+document.getElementById("btnPickSub").addEventListener("click", () => document.getElementById("fileSub").click());
+document.getElementById("fileVideo").addEventListener("change", e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  if (videoObjUrl) URL.revokeObjectURL(videoObjUrl);
+  videoObjUrl = URL.createObjectURL(f);
+  videoEl.src = videoObjUrl;
+  document.getElementById("videoFileName").textContent = f.name;
+  videoKey = f.name + "|" + f.size;
+  cues = []; cueIdx = -1; selIdx = -1; refSamples = null;
+  hideDubPanel();
+  renderSubList();
+  updateScoreSummary();
+  setVideoHint("已导入视频，正在检测内嵌字幕与解析原声音轨…");
+  videoEl.load();
+  loadRefAudio(f);
+});
+/* 解析视频音轨（用于和录音比对）：解码后统一重采样成 16kHz 单声道 */
+async function loadRefAudio(file) {
+  if (file.size > 400 * 1024 * 1024) {
+    setVideoHint("视频超过 400MB，为节省内存未解析原声，跟读评分不可用（仍可听原声）。");
+    return;
+  }
+  try {
+    const ab = await file.arrayBuffer();
+    const buf = await getAudioCtx().decodeAudioData(ab);
+    refSamples = await toMono16k(buf);
+    if (refSamples && refSamples.length > 1600) setVideoHint("原声已就绪：点字幕选一句，听原声后录音跟读，系统给出相似度评分。");
+    else { refSamples = null; setVideoHint("未解析到有效音轨（视频可能没有声音），跟读评分不可用。"); }
+  } catch (err) {
+    refSamples = null;
+    setVideoHint("未能解析该视频的音轨（浏览器不支持此音频编码），跟读评分不可用；仍可听原声与用示范朗读对照。");
+  }
+}
+function toMono16k(buf) {
+  const rate = 16000;
+  const len = Math.max(1, Math.ceil(buf.duration * rate));
+  const off = new OfflineAudioContext(1, len, rate);
+  const src = off.createBufferSource();
+  src.buffer = buf;
+  src.connect(off.destination);
+  src.start();
+  return off.startRendering().then(b => b.getChannelData(0));
+}
+videoEl.addEventListener("loadedmetadata", () => { tryEmbeddedCues(); });
+videoEl.addEventListener("pause", stopVideoSpeech);
+videoEl.addEventListener("seeked", () => {
+  stopVideoSpeech();
+  cueIdx = currentCueIndex(videoEl.currentTime);
+  paintCue();
+});
+videoEl.addEventListener("timeupdate", () => {
+  if (playUntil != null && videoEl.currentTime >= playUntil) { playUntil = null; videoEl.pause(); }
+  const i = currentCueIndex(videoEl.currentTime);
+  if (i !== cueIdx) { cueIdx = i; paintCue(); }
+});
+
+/* ---- 字幕来源：内嵌轨 → 自动载入 ---- */
+function tryEmbeddedCues() {
+  const tracks = videoEl.textTracks;
+  if (!tracks || !tracks.length) { embedFallbackHint(); return; }
+  for (let i = 0; i < tracks.length; i++) { try { tracks[i].mode = "hidden"; } catch (e) { /* 忽略 */ } }
+  setTimeout(harvestEmbedded, 350);   // 给字幕轨一点解析时间
+}
+function harvestEmbedded() {
+  const found = [];
+  const tracks = videoEl.textTracks || [];
+  for (let i = 0; i < tracks.length; i++) {
+    const list = tracks[i].cues;
+    if (!list) continue;
+    for (let j = 0; j < list.length; j++) {
+      const c = list[j];
+      const text = cleanCueText(c.text);
+      if (text) found.push({ start: c.startTime, end: c.endTime, text });
+    }
+  }
+  const uniq = [];
+  const seen = new Set();
+  for (const c of found.sort((a, b) => a.start - b.start)) {
+    const k = Math.round(c.start * 100) + "|" + c.text;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    uniq.push(c);
+  }
+  if (uniq.length) {
+    cues = uniq; cueIdx = -1; selIdx = -1; renderSubList();
+    selectCue(0);
+    setVideoHint(`已自动载入 ${cues.length} 条内嵌字幕，点「听原声」「录音跟读」即可逐句练习。`);
+  } else embedFallbackHint();
+}
+function embedFallbackHint() {
+  if (!cues.length) setVideoHint("未检测到内嵌字幕。点「导入字幕」选择 .srt / .vtt 字幕文件，导入后即可逐句跟读评分。");
+}
+
+/* ---- 字幕来源：外部 srt / vtt 文件 ---- */
+function cleanCueText(t) {
+  return String(t || "")
+    .replace(/<[^>]*>/g, "")        // HTML 标签
+    .replace(/\{[^}]*\}/g, "")      // ASS 样式标记
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function parseSubtitle(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  text = text.replace(/\r/g, "");
+  const list = [];
+  for (const block of text.split(/\n{2,}/)) {
+    const lines = block.split("\n").filter(l => l.trim());
+    if (!lines.length) continue;
+    const ti = lines.findIndex(l => l.includes("-->"));
+    if (ti === -1) continue;
+    const m = lines[ti].match(/(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[.,](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[.,](\d{1,3})/);
+    if (!m) continue;
+    const sec = (h, mi, s, ms) => (Number(h) || 0) * 3600 + Number(mi) * 60 + Number(s) + Number(ms) / 1000;
+    const start = sec(m[1], m[2], m[3], m[4]);
+    const end = sec(m[5], m[6], m[7], m[8]);
+    const cueText = cleanCueText(lines.slice(ti + 1).join(" "));
+    if (cueText && end > start) list.push({ start, end, text: cueText });
+  }
+  return list.sort((a, b) => a.start - b.start);
+}
+document.getElementById("fileSub").addEventListener("change", e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let text;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(reader.result); }
+    catch (err) {
+      try { text = new TextDecoder("gbk").decode(reader.result); }
+      catch (err2) { text = new TextDecoder("utf-8").decode(reader.result); }
+    }
+    const list = parseSubtitle(text);
+    if (!list.length) { setVideoHint("字幕解析失败：没有找到有效的时间轴条目（支持 .srt / .vtt）。"); return; }
+    cues = list; cueIdx = -1; selIdx = -1; renderSubList();
+    selectCue(0);
+    setVideoHint(`已载入字幕 ${list.length} 条，点「听原声」「录音跟读」即可逐句练习。`);
+  };
+  reader.readAsArrayBuffer(f);
+});
+
+/* ---- 字幕列表与时间轴同步 ---- */
+function cueKey(c) { return (Math.round(c.start * 10) / 10).toFixed(1); }
+function renderSubList() {
+  const box = document.getElementById("subList");
+  const scores = videoScores[videoKey] || {};
+  box.innerHTML = cues.map((c, i) => {
+    const s = scores[cueKey(c)];
+    return `
+    <div class="sub-item${i === selIdx ? " sel" : ""}" data-cue="${i}" role="button" tabindex="0">
+      <span class="sub-time">${fmtClock(c.start)}</span>
+      <span class="sub-text">${esc(c.text)}</span>
+      ${s != null ? `<span class="sub-score">${s} 分</span>` : ""}
+    </div>`;
+  }).join("");
+  paintCue();
+}
+function currentCueIndex(t) {
+  for (let i = 0; i < cues.length; i++) {
+    if (t >= cues[i].start && t < cues[i].end) return i;
+    if (cues[i].start > t) break;
+  }
+  return -1;
+}
+function paintCue() {
+  const items = document.getElementById("subList").children;
+  for (let i = 0; i < items.length; i++) items[i].classList.toggle("on", i === cueIdx);
+  if (cueIdx >= 0 && items[cueIdx]) items[cueIdx].scrollIntoView({ block: "nearest" });
+}
+function paintSel() {
+  const items = document.getElementById("subList").children;
+  for (let i = 0; i < items.length; i++) items[i].classList.toggle("sel", i === selIdx);
+  if (selIdx >= 0 && items[selIdx]) items[selIdx].scrollIntoView({ block: "nearest" });
+}
+document.getElementById("subList").addEventListener("click", e => {
+  const it = e.target.closest("[data-cue]");
+  if (!it) return;
+  const i = Number(it.dataset.cue);
+  const c = cues[i];
+  if (!c) return;
+  stopVideoSpeech();
+  videoEl.currentTime = Math.max(0, c.start - 0.1);
+  selectCue(i);
+});
+document.getElementById("subList").addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const it = e.target.closest("[data-cue]");
+  if (!it) return;
+  e.preventDefault();
+  it.click();
+});
+
+/* ---- 跟读面板 ---- */
+function selectCue(i) {
+  selIdx = i;
+  const c = cues[i];
+  if (!c) { hideDubPanel(); return; }
+  document.getElementById("dubPanel").hidden = false;
+  document.getElementById("dubLine").textContent = `第 ${i + 1} / ${cues.length} 句 · ${c.text}`;
+  const best = (videoScores[videoKey] || {})[cueKey(c)];
+  showDubResult(best != null ? `历史最高 <b>${best}</b> 分 · 可再录一次刷新记录` : "还没有评分：先「听原声」，再点「录音跟读」。");
+  paintSel();
+  updateScoreSummary();
+}
+function showDubResult(html) { document.getElementById("dubResult").innerHTML = html; }
+function hideDubPanel() { document.getElementById("dubPanel").hidden = true; }
+function updateScoreSummary() {
+  const el = document.getElementById("videoScore");
+  const bucket = videoScores[videoKey] || {};
+  const vals = Object.values(bucket);
+  if (!vals.length) { el.textContent = cues.length ? `${cues.length} 句可跟读` : ""; return; }
+  const avg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  el.textContent = `已评 ${vals.length}/${cues.length} 句 · 平均 ${avg} 分`;
+}
+document.getElementById("btnPlayLine").addEventListener("click", () => {
+  const c = cues[selIdx];
+  if (!c) return;
+  stopVideoSpeech();
+  playUntil = c.end + 0.25;
+  videoEl.currentTime = Math.max(0, c.start - 0.15);
+  videoEl.play().catch(() => {});
+});
+document.getElementById("btnDemoLine").addEventListener("click", () => {
+  const c = cues[selIdx];
+  if (c) speakLine(c.text);
+});
+document.getElementById("btnNextLine").addEventListener("click", () => {
+  if (selIdx + 1 < cues.length) selectCue(selIdx + 1);
+});
+document.getElementById("btnRecord").addEventListener("click", () => {
+  if (mediaRecorder && mediaRecorder.state === "recording") { stopRecording(false); return; }
+  startRecording();
+});
+
+/* ---- 录音 ---- */
+async function startRecording() {
+  const c = cues[selIdx];
+  if (!c) return;
+  if (!refSamples) { showDubResult("视频原声未就绪，无法评分（先导入带音轨的视频）。"); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
+    showDubResult("当前浏览器不支持录音（需要麦克风权限支持）。");
+    return;
+  }
+  stopVideoSpeech();
+  if (!videoEl.paused) videoEl.pause();
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    showDubResult("无法访问麦克风：请允许麦克风权限（页面需 https 或 localhost 打开）。");
+    return;
+  }
+  recChunks = [];
+  recIdx = selIdx;
+  recCancelled = false;
+  mediaRecorder = typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm")
+    ? new MediaRecorder(micStream, { mimeType: "audio/webm" })
+    : new MediaRecorder(micStream);
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    document.getElementById("btnRecord").textContent = "录音跟读";
+    if (recCancelled || !recChunks.length) { recCancelled = false; return; }
+    scoreRecording(new Blob(recChunks, { type: "audio/webm" }), recIdx);
+  };
+  mediaRecorder.start();
+  document.getElementById("btnRecord").textContent = "停止录音";
+  showDubResult("录音中… 请跟读这一句，读完点「停止录音」。");
+  const maxMs = Math.max(2500, (c.end - c.start + 2) * 1000);
+  recTimer = setTimeout(() => stopRecording(false), maxMs);
+}
+function stopRecording(cancel) {
+  if (cancel) recCancelled = true;
+  if (recTimer) { clearTimeout(recTimer); recTimer = null; }
+  if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+}
+
+/* ---- 评分：录音与原声片段比对（MFCC + DTW） ---- */
+function sliceRef(c) {
+  if (!refSamples) return null;
+  const a = Math.max(0, Math.floor(c.start * 16000));
+  const b = Math.min(refSamples.length, Math.ceil(c.end * 16000));
+  if (b - a < 1600) return null;
+  return refSamples.slice(a, b);
+}
+function rmsOf(s) {
+  const step = Math.max(1, Math.floor(s.length / 20000));
+  let sum = 0, n = 0;
+  for (let i = 0; i < s.length; i += step) { sum += s[i] * s[i]; n++; }
+  return Math.sqrt(sum / Math.max(1, n));
+}
+async function scoreRecording(blob, idx) {
+  const c = cues[idx];
+  if (!c) return;
+  showDubResult("正在比对与原声的相似度…");
+  let userBuf;
+  try { userBuf = await getAudioCtx().decodeAudioData(await blob.arrayBuffer()); }
+  catch (e) { showDubResult("录音解码失败，请重试。"); return; }
+  const userSamples = await toMono16k(userBuf);
+  if (rmsOf(userSamples) < 0.006) { showDubResult("没有检测到明显的声音，请靠近麦克风再试。"); return; }
+  const ref = sliceRef(c);
+  if (!ref) { showDubResult("这一句的原声片段不可用，无法评分。"); return; }
+  const refFeat = toFeat(mfcc(ref, 16000));
+  const userFeat = toFeat(mfcc(userSamples, 16000));
+  if (refFeat.length < 4 || userFeat.length < 4) { showDubResult("音频太短，无法评分。"); return; }
+  const dist = dtw(refFeat, userFeat);
+  const durRef = ref.length / 16000, durUser = userSamples.length / 16000;
+  const ratio = Math.min(durRef, durUser) / Math.max(durRef, durUser);
+  let score = Math.round(scoreFromDistance(dist) * (0.8 + 0.2 * ratio));
+  score = Math.max(0, Math.min(100, score));
+  const key = cueKey(c);
+  const bucket = videoScores[videoKey] || (videoScores[videoKey] = {});
+  const prev = bucket[key];
+  const isBest = prev == null || score > prev;
+  if (isBest) {
+    bucket[key] = score;
+    dbPut("meta", { k: "videoScores", v: videoScores });
+  }
+  renderSubList();
+  paintSel();
+  paintCue();
+  const grade = score >= 85 ? "非常像原声" : score >= 70 ? "相似度不错" : score >= 50 ? "再练练会更像" : "差别较大，多听两遍原声";
+  showDubResult(`相似度 <b>${score}</b> 分 · ${grade}${isBest ? " · 已记录最高分" : `（历史最高 ${prev} 分）`} · 第 ${idx + 1} 句`);
+  updateScoreSummary();
+}
+
+/* ---- 相似度算法：MFCC 特征 + DTW 对齐 ---- */
+/* 距离→分数：logistic 映射，锚点用真人语音样本校准（同句异嗓 ~12、异句 ~18） */
+const SCORE_D0 = 15.0, SCORE_W = 2.2;
+function scoreFromDistance(d) {
+  return Math.round(100 / (1 + Math.exp((d - SCORE_D0) / SCORE_W)));
+}
+/* 特征向量：丢弃 c0 能量系数（等价于音量/麦克风增益不变），只用 c1..c12 比频谱形状 */
+function toFeat(frames) {
+  return frames.map(f => {
+    const v = new Float32Array(f.length - 1);
+    for (let i = 1; i < f.length; i++) v[i - 1] = f[i];
+    return v;
+  });
+}
+function hannWindow(n) {
+  const w = new Float32Array(n);
+  for (let i = 0; i < n; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1));
+  return w;
+}
+function fftInPlace(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const half = len >> 1;
+    const ang = -2 * Math.PI / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < half; k++) {
+        const ur = re[i + k], ui = im[i + k];
+        const xr = re[i + k + half], xi = im[i + k + half];
+        const vr = xr * cr - xi * ci;
+        const vi = xr * ci + xi * cr;
+        re[i + k] = ur + vr; im[i + k] = ui + vi;
+        re[i + k + half] = ur - vr; im[i + k + half] = ui - vi;
+        const ncr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+function melFilterbank(nFilters, fftSize, sampleRate) {
+  const toMel = f => 2595 * Math.log10(1 + f / 700);
+  const fromMel = m => 700 * (Math.pow(10, m / 2595) - 1);
+  const maxMel = toMel(sampleRate / 2);
+  const pts = [];
+  for (let i = 0; i < nFilters + 2; i++) pts.push(fromMel(maxMel * i / (nFilters + 1)));
+  const bins = pts.map(f => Math.floor((fftSize + 1) * f / sampleRate));
+  const fb = [];
+  for (let m = 1; m <= nFilters; m++) {
+    const row = new Float32Array(fftSize / 2 + 1);
+    const l = bins[m - 1], c = bins[m], r = bins[m + 1];
+    for (let k = l; k < c; k++) if (c > l) row[k] = (k - l) / (c - l);
+    for (let k = c; k < r; k++) if (r > c) row[k] = (r - k) / (r - c);
+    fb.push(row);
+  }
+  return fb;
+}
+let _melCache = null;
+function mfcc(samples, sampleRate) {
+  const FRAME = 400, HOP = 160, NFFT = 512, NCOEF = 13;
+  if (!_melCache || _melCache.sr !== sampleRate) {
+    _melCache = { sr: sampleRate, fb: melFilterbank(24, NFFT, sampleRate), win: hannWindow(FRAME) };
+  }
+  const { fb, win } = _melCache;
+  const frames = [];
+  for (let s = 0; s + FRAME <= samples.length; s += HOP) {
+    const re = new Float32Array(NFFT), im = new Float32Array(NFFT);
+    for (let i = 0; i < FRAME; i++) re[i] = samples[s + i] * win[i];
+    fftInPlace(re, im);
+    const power = new Float32Array(NFFT / 2 + 1);
+    for (let k = 0; k <= NFFT / 2; k++) power[k] = re[k] * re[k] + im[k] * im[k];
+    const melE = new Float32Array(fb.length);
+    for (let m = 0; m < fb.length; m++) {
+      let e = 0;
+      const row = fb[m];
+      for (let k = 0; k < row.length; k++) if (row[k]) e += power[k] * row[k];
+      melE[m] = Math.log(e + 1e-8);
+    }
+    const coef = new Float32Array(NCOEF);
+    for (let c = 0; c < NCOEF; c++) {
+      let sum = 0;
+      for (let m = 0; m < melE.length; m++) sum += melE[m] * Math.cos(Math.PI * c * (m + 0.5) / melE.length);
+      coef[c] = sum;
+    }
+    frames.push(coef);
+  }
+  if (frames.length) {   // 倒谱均值归一化：抵消音量与声道整体差异
+    for (let c = 0; c < NCOEF; c++) {
+      let mean = 0;
+      for (const f of frames) mean += f[c];
+      mean /= frames.length;
+      for (const f of frames) f[c] -= mean;
+    }
+  }
+  return frames;
+}
+function dtw(a, b) {
+  const n = a.length, m = b.length;
+  if (!n || !m) return Infinity;
+  let prev = new Float64Array(m + 1).fill(Infinity);
+  let cur = new Float64Array(m + 1);
+  prev[0] = 0;
+  for (let i = 1; i <= n; i++) {
+    cur[0] = Infinity;
+    const ai = a[i - 1];
+    for (let j = 1; j <= m; j++) {
+      const bj = b[j - 1];
+      let d = 0;
+      for (let c = 0; c < ai.length; c++) { const t = ai[c] - bj[c]; d += t * t; }
+      d = Math.sqrt(d);
+      cur[j] = d + Math.min(prev[j], cur[j - 1], prev[j - 1]);
+    }
+    const tmp = prev; prev = cur; cur = tmp;
+  }
+  return prev[m] / (n + m);
+}
+
+/* ---- 示范朗读（TTS，仅供对照参考）：英文走应用内引擎，中文自动用中文语音 ---- */
+function speakLine(text) {
+  if (!text) return;
+  if (/[\u4e00-\u9fff]/.test(text)) { speakLineZh(text); return; }
+  speak(text, true);
+}
+function speakLineZh(text) {
+  const engine = settings.ttsEngine || "online";
+  if (engine === "system" && TTS_OK && !remoteOnly) {
+    speechSynthesis.cancel();
+    requestAnimationFrame(() => {
+      try { speechSynthesis.resume(); } catch (e) { /* 忽略 */ }
+      const u = new SpeechSynthesisUtterance(text);
+      if (!voicesCache.length) refreshVoices();
+      const zh = voicesCache.find(v => (v.lang || "").replace("_", "-").toLowerCase().startsWith("zh"));
+      if (zh) { u.voice = zh; u.lang = zh.lang; } else u.lang = "zh-CN";
+      u.rate = 0.95;
+      u.onstart = () => { systemTtsWorked = true; };
+      u.onend = u.onerror = () => { activeUtterance = null; };
+      activeUtterance = u;
+      speechSynthesis.speak(u);
+    });
+    return;
+  }
+  playAudioSrc(sentenceTtsUrl(text, "zh"));
+}
 
 /* ================= 演示工具 ================= */
 document.getElementById("demoTomorrow").addEventListener("click", async () => {
@@ -10156,6 +10776,7 @@ document.addEventListener("keydown", e => {
   if (importModal.classList.contains("open")) return;
   if (starModal.classList.contains("open")) return;
   if (profilePanel.classList.contains("open")) return;
+  if (videoStage.style.display !== "none") return;
   if (welcomeStage.style.display !== "none") {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -10219,6 +10840,7 @@ document.addEventListener("keydown", e => {
   starred = {};
   for (const row of starRows) starred[row.word] = { addAt: row.addAt || 0 };
   dailyLog = metaMap.get("dailyLog") || {};
+  videoScores = metaMap.get("videoScores") || {};
   if (state.todayLearned && state.todayLearned.length && !dailyLog[state.date]) {
     // 老数据补录：把今日已学并入每日记录
     dailyLog[state.date] = state.todayLearned.slice();
