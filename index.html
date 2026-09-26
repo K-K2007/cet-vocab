@@ -1055,6 +1055,8 @@ button:focus-visible, a:focus-visible {
 .video-title { font-family: var(--serif); font-size: 19px; font-weight: 700; letter-spacing: 1px; }
 .video-file { font-size: 12px; color: var(--ink-3); }
 .video-player { width: 100%; display: block; border-radius: 14px; background: #10140f; aspect-ratio: 16 / 9; }
+.video-card.dragover { border-color: var(--green); box-shadow: 0 0 0 3px rgba(61,90,62,.15), var(--shadow-md); }
+.video-card.dragover .video-hint { color: var(--green); }
 .video-tools { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 .video-tools .mini-btn { flex: 0 0 auto; padding: 0 18px; }
 .video-score { margin-left: auto; font-family: var(--serif); font-size: 14px; font-weight: 700; color: var(--green); }
@@ -1288,7 +1290,7 @@ button:focus-visible, a:focus-visible {
         <button class="mini-btn primary" id="btnPickVideo">导入视频</button>
         <button class="mini-btn" id="btnPickSub">导入字幕</button>
       </div>
-      <p class="video-hint" id="videoHint">导入视频后自动检测内嵌字幕；没有内嵌字幕就再导入配套的 .srt / .vtt 字幕文件。点字幕选一句 → 听原声 → 录音跟读，系统会给出与原声的相似度评分。</p>
+      <p class="video-hint" id="videoHint">点「导入视频」选择文件，或直接把视频拖到本页。导入后自动检测内嵌字幕；没有内嵌字幕就再导入配套的 .srt / .vtt 字幕文件。点字幕选一句 → 听原声 → 录音跟读，系统会给出与原声的相似度评分。</p>
       <div class="dub-panel" id="dubPanel" hidden>
         <div class="dub-line" id="dubLine"></div>
         <div class="dub-actions">
@@ -9956,10 +9958,8 @@ document.getElementById("btnVideo").addEventListener("click", showVideoStage);
 /* ---- 导入视频 ---- */
 document.getElementById("btnPickVideo").addEventListener("click", () => document.getElementById("fileVideo").click());
 document.getElementById("btnPickSub").addEventListener("click", () => document.getElementById("fileSub").click());
-document.getElementById("fileVideo").addEventListener("change", e => {
-  const f = e.target.files[0];
-  e.target.value = "";
-  if (!f) return;
+/* ---- 导入视频（文件选择 / 拖拽共用） ---- */
+function importVideoFile(f) {
   if (videoObjUrl) URL.revokeObjectURL(videoObjUrl);
   videoObjUrl = URL.createObjectURL(f);
   videoEl.src = videoObjUrl;
@@ -9972,7 +9972,32 @@ document.getElementById("fileVideo").addEventListener("change", e => {
   setVideoHint("已导入视频，正在检测内嵌字幕与解析原声音轨…");
   videoEl.load();
   loadRefAudio(f);
+}
+document.getElementById("fileVideo").addEventListener("change", e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (f) importVideoFile(f);
 });
+/* 拖拽导入：视频文件或字幕文件直接拖到卡片上 */
+(() => {
+  const card = document.querySelector(".video-card");
+  if (!card) return;
+  const hasFiles = e => !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf("Files") !== -1);
+  card.addEventListener("dragenter", e => { if (hasFiles(e)) { e.preventDefault(); card.classList.add("dragover"); } });
+  card.addEventListener("dragover", e => { if (hasFiles(e)) { e.preventDefault(); card.classList.add("dragover"); } });
+  card.addEventListener("dragleave", () => card.classList.remove("dragover"));
+  card.addEventListener("drop", e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    card.classList.remove("dragover");
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    const name = (f.name || "").toLowerCase();
+    if (/\.(srt|vtt)$/.test(name)) importSubtitleFile(f);
+    else if ((f.type || "").indexOf("video/") === 0 || /\.(mp4|m4v|webm|mov|ogv|mkv|avi)$/.test(name)) importVideoFile(f);
+    else setVideoHint("不支持的文件类型：请拖入视频（mp4 / webm / mov…）或字幕（.srt / .vtt）。");
+  });
+})();
 /* 解析视频音轨（用于和录音比对）：解码后统一重采样成 16kHz 单声道 */
 async function loadRefAudio(file) {
   if (file.size > 400 * 1024 * 1024) {
@@ -10077,10 +10102,8 @@ function parseSubtitle(text) {
   }
   return list.sort((a, b) => a.start - b.start);
 }
-document.getElementById("fileSub").addEventListener("change", e => {
-  const f = e.target.files[0];
-  e.target.value = "";
-  if (!f) return;
+/* ---- 导入字幕（文件选择 / 拖拽共用）：UTF-8 优先，回退 GBK ---- */
+function importSubtitleFile(f) {
   const reader = new FileReader();
   reader.onload = () => {
     let text;
@@ -10096,6 +10119,11 @@ document.getElementById("fileSub").addEventListener("change", e => {
     setVideoHint(`已载入字幕 ${list.length} 条，点「听原声」「录音跟读」即可逐句练习。`);
   };
   reader.readAsArrayBuffer(f);
+}
+document.getElementById("fileSub").addEventListener("change", e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (f) importSubtitleFile(f);
 });
 
 /* ---- 字幕列表与时间轴同步 ---- */
