@@ -1254,6 +1254,11 @@ button:focus-visible, a:focus-visible {
     </div>
   </div>
   <div class="profile-section">
+    <div class="profile-section-title">学习进度</div>
+    <button class="wl-clear-btn" id="btnResetProgress" style="width:100%;">重置学习进度</button>
+    <p class="demo-note">清空所有单词的复习进度、每日学习记录与统计数据。词书、生词本、发音设置与配音记录保留；重置前可先「导出备份」。</p>
+  </div>
+  <div class="profile-section">
     <div class="profile-section-title">演示工具</div>
     <button class="demo-btn" id="demoTomorrow">模拟隔天 · 让已学词全部到期</button>
     <p class="demo-note">点击后刷新页面，所有已学词进入待复习状态，可在统计里查看。</p>
@@ -11007,6 +11012,23 @@ document.getElementById("demoTomorrow").addEventListener("click", async () => {
   state.todayNew = 0;
   saveState();
   location.reload();
+});
+
+/* ================= 重置学习进度 ================= */
+document.getElementById("btnResetProgress").addEventListener("click", async () => {
+  if (!confirm("重置将清空所有单词的复习进度、每日学习记录与统计数据。词书、生词本、发音设置、配音记录都会保留。建议先导出备份。确定要重置吗？")) return;
+  await dbClear("progress");
+  progress = {};
+  dailyLog = {};
+  await dbPut("meta", { k: "dailyLog", v: dailyLog });
+  state = {
+    date: todayStr(), todayLearned: [], todayNew: 0,
+    stats: { known: 0, recalled: 0, revealed: 0, easy: 0 },
+    firstDate: todayStr(), lastDate: todayStr(), streak: 1
+  };
+  await dbPut("meta", { k: "state", v: state });
+  closeProfile();
+  showWelcome();
 });
 
 /* ================= 渲染学习卡 ================= */
