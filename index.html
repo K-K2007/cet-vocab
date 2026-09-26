@@ -1210,6 +1210,20 @@ button:focus-visible, a:focus-visible {
   </div>
 </div>
 
+<!-- 生词本弹窗（首页入口） -->
+<div class="modal-overlay" id="starModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="starModalTitle">
+    <h2 class="modal-title" id="starModalTitle">生词本</h2>
+    <p class="modal-sub" id="starModalSub">还没有生词</p>
+    <div class="wl-scroll" id="starModalBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnStarModalTest">开始测试</button>
+      <button class="btn btn-ghost" id="btnStarModalClear">清空生词本</button>
+      <button class="btn btn-ghost" id="btnStarModalClose">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- 隐藏文件输入 -->
 <input type="file" id="fileCsv" accept=".csv,.txt,.tsv" hidden>
 <input type="file" id="fileBackup" accept=".json" hidden>
@@ -1251,8 +1265,8 @@ button:focus-visible, a:focus-visible {
         开始背单词
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
       </button>
-      <button class="btn-hero star-hero-btn" id="btnStarTestHero" aria-label="测试生词本词汇">
-        生词本测试（<span class="star-count">0</span>）
+      <button class="btn-hero star-hero-btn" id="btnStarTestHero" aria-label="生词本：查看与测试">
+        生词本（<span class="star-count">0</span>）
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17.75 5.53 21l1.23-6.88L2 9.26l6.91-.95L12 2l3.09 6.31 6.91.95-4.76 4.86L18.47 21z"/></svg>
       </button>
       <span class="hero-note">按 Enter 也可开始</span>
@@ -1850,12 +1864,16 @@ function enterReviewStage() {
     if (nw) setTimeout(() => speak(nw.word, false), 400);
   }
 }
+/* 生词本测试：直接开测（入口弹层/统计页调用前各自确认） */
+function startStarSession() {
+  buildStarQueue();
+  enterReviewStage();
+}
 function showStarStudy() {
   const n = starWords().length;
   if (!n) return;
   if (!confirm(`开始生词本测试？共 ${n} 个生词，每组最多 ${BATCH} 个，测完可继续下一组。`)) return;
-  buildStarQueue();
-  enterReviewStage();
+  startStarSession();
 }
 /* 按天复习：复习某一天记录的全部单词 */
 function startDayReview(date) {
@@ -1876,15 +1894,16 @@ document.getElementById("btnStart").addEventListener("click", () => {
   interacted = true;
   showStudy();
 });
-/* 生词本测试按钮：首页 + 抽屉统计页各一个 */
+/* 生词本入口按钮：首页（查看+测试弹层）+ 抽屉统计页（直接测试） */
 const btnStarTestHero = document.getElementById("btnStarTestHero");
 const btnStarTestPanel = document.getElementById("btnStarTestPanel");
 function updateStarButtons() {
   const n = starWords().length;
   document.querySelectorAll(".star-count").forEach(el => { el.textContent = n; });
-  btnStarTestHero.disabled = btnStarTestPanel.disabled = n === 0;
+  btnStarTestHero.disabled = false;          // 首页入口始终可开，空本显示引导
+  btnStarTestPanel.disabled = n === 0;
 }
-btnStarTestHero.addEventListener("click", showStarStudy);
+btnStarTestHero.addEventListener("click", openStarModal);
 btnStarTestPanel.addEventListener("click", showStarStudy);
 backHomeBtn.addEventListener("click", () => {
   speechSynthesis.cancel();
@@ -1956,6 +1975,7 @@ function openProfile() {
   updateAccentUI();
   renderStarList();
   renderDayLog();
+  closeStarModal();
   closeWordList();
   profilePanel.classList.add("open");
   profileOverlay.classList.add("open");
@@ -2148,13 +2168,67 @@ document.getElementById("btnStarClear").addEventListener("click", async () => {
   await starClearAll();
   renderStarList();
 });
+
+/* ---- 首页生词本弹层：查看 / 单个移除 / 清空 / 开始测试 ---- */
+const starModal = document.getElementById("starModal");
+function renderStarModal() {
+  const list = starWords();
+  document.getElementById("starModalSub").textContent = list.length
+    ? `共 ${list.length} 个词 · 不主动清除就一直在`
+    : "生词本还是空的";
+  document.getElementById("starModalBody").innerHTML = list.length
+    ? list.map(word => `
+      <div class="wl-item">
+        <span class="wl-word">${esc(word)}</span>
+        <span class="wl-mean">${esc(wordMean(word))}</span>
+        <button class="book-del" data-star-modal-del="${esc(word)}" aria-label="移出生词本 ${esc(word)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>`).join("")
+    : `<div class="wl-empty">生词本还是空的。<br>学习中选出「不认识 / 忘了」的词会自动收进来。</div>`;
+  document.getElementById("btnStarModalTest").disabled = !list.length;
+  document.getElementById("btnStarModalClear").disabled = !list.length;
+}
+function openStarModal() {
+  renderStarModal();
+  starModal.classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+function closeStarModal() {
+  starModal.classList.remove("open");
+  document.body.style.overflow = "";
+}
+document.getElementById("starModalBody").addEventListener("click", async e => {
+  const btn = e.target.closest("[data-star-modal-del]");
+  if (!btn) return;
+  await starRemove(btn.dataset.starModalDel);
+  renderStarModal();
+  renderStarList();
+  updateStarButtons();
+});
+document.getElementById("btnStarModalClear").addEventListener("click", async () => {
+  const n = starWords().length;
+  if (!n) return;
+  if (!confirm(`确定清空生词本（共 ${n} 词）吗？学习进度保留，只是不再单独重测。`)) return;
+  await starClearAll();
+  renderStarModal();
+  renderStarList();
+  updateStarButtons();
+});
+document.getElementById("btnStarModalTest").addEventListener("click", () => {
+  if (!starWords().length) return;
+  closeStarModal();
+  startStarSession();
+});
+document.getElementById("btnStarModalClose").addEventListener("click", closeStarModal);
+starModal.addEventListener("click", e => { if (e.target === starModal) closeStarModal(); });
 avatarBtn.addEventListener("click", () => {
   profilePanel.classList.contains("open") ? closeProfile() : openProfile();
 });
 document.getElementById("profileClose").addEventListener("click", closeProfile);
 profileOverlay.addEventListener("click", closeProfile);
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && !importModal.classList.contains("open")) {
+  if (e.key !== "Escape") return;
+  if (starModal.classList.contains("open")) { closeStarModal(); return; }
+  if (!importModal.classList.contains("open")) {
     closeProfile();
     closePlanPop();
   }
@@ -10080,6 +10154,7 @@ cardEl.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   if (e.target.matches("input, textarea, select")) return;
   if (importModal.classList.contains("open")) return;
+  if (starModal.classList.contains("open")) return;
   if (profilePanel.classList.contains("open")) return;
   if (welcomeStage.style.display !== "none") {
     if (e.key === "Enter") {
