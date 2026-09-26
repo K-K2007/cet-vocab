@@ -998,6 +998,25 @@ button:focus-visible, a:focus-visible {
   color: var(--ink-3);
 }
 
+/* ================= 生词本 ================= */
+.star-chip {
+  position: absolute; top: 14px; left: 14px; z-index: 3;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 34px; padding: 0 12px;
+  font-size: 12px; letter-spacing: 1px; color: var(--accent);
+  background: var(--accent-soft); border-radius: 999px;
+}
+.star-chip .retest-note { color: var(--ink-3); letter-spacing: 0; }
+.wl-actions { margin-top: 10px; }
+.wl-clear-btn {
+  display: block; width: 100%; height: 44px; margin-top: 12px;
+  border: 1px solid var(--line-2); border-radius: 12px;
+  background: transparent; color: var(--ink-2);
+  font-size: 13px; letter-spacing: 1px; cursor: pointer;
+  font-family: inherit; transition: border-color .2s, color .2s, background .2s;
+}
+.wl-clear-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
 /* ================= 响应式 ================= */
 @media (max-width: 640px) {
   .topbar-inner { height: 60px; padding: 0 16px; }
@@ -1058,7 +1077,7 @@ button:focus-visible, a:focus-visible {
     </div>
     <div class="top-actions">
       <div class="day-meta" id="dayMeta">
-        <div class="day-num">今日已学 <b id="dayNum">0</b> 词</div>
+        <div class="day-num" id="dayNumWrap">今日已学 <b id="dayNum">0</b> 词</div>
         <div class="dots" id="dots" aria-label="本组进度"></div>
       </div>
       <button class="avatar-btn animate-fade-down stagger-2" id="avatarBtn" aria-label="个人中心" aria-expanded="false">
@@ -1100,7 +1119,14 @@ button:focus-visible, a:focus-visible {
       <div class="pstat"><div class="pstat-num" id="statAccuracy">—</div><div class="pstat-label">正确率</div></div>
       <div class="pstat link" id="statDueBox" role="button" tabindex="0"><div class="pstat-num" id="statDue">0</div><div class="pstat-label">待复习</div></div>
       <div class="pstat"><div class="pstat-num" id="statMastered">0</div><div class="pstat-label">长期记忆</div></div>
+      <div class="pstat"><div class="pstat-num"><span class="star-count">0</span></div><div class="pstat-label">生词本</div></div>
     </div>
+    <button class="mini-btn primary" id="btnStarTestPanel" style="width:100%;justify-content:center;">生词本测试（<span class="star-count">0</span> 词）</button>
+  <div class="profile-section">
+    <div class="profile-section-title">生词本管理</div>
+    <div class="wl-scroll" id="starBody"></div>
+    <button class="wl-clear-btn" id="btnStarClear">清空生词本</button>
+  </div>
   <div class="profile-section">
     <div class="profile-section-title">学习分布</div>
     <ul class="profile-list">
@@ -1204,6 +1230,10 @@ button:focus-visible, a:focus-visible {
         开始背单词
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
       </button>
+      <button class="btn-hero star-hero-btn" id="btnStarTestHero" aria-label="测试生词本词汇">
+        生词本测试（<span class="star-count">0</span>）
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17.75 5.53 21l1.23-6.88L2 9.26l6.91-.95L12 2l3.09 6.31 6.91.95-4.76 4.86L18.47 21z"/></svg>
+      </button>
       <span class="hero-note">按 Enter 也可开始</span>
     </div>
     <div class="hero-stats animate-fade-up stagger-6">
@@ -1303,10 +1333,10 @@ const DEMO_WORDS = [
 
 /* ================= IndexedDB 数据层 ================= */
 const DB_NAME = "ciyi_db";
-const DB_VER = 1;
+const DB_VER = 2;
 let db = null;
 let dbFallback = false;          // 存储不可用（如 iOS 无痕模式）→ 仅内存运行
-const memStore = { books: new Map(), progress: new Map(), meta: new Map() };
+const memStore = { books: new Map(), progress: new Map(), meta: new Map(), star: new Map() };
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -1318,6 +1348,7 @@ function openDB() {
       if (!d.objectStoreNames.contains("books")) d.createObjectStore("books", { keyPath: "id" });
       if (!d.objectStoreNames.contains("progress")) d.createObjectStore("progress", { keyPath: "word" });
       if (!d.objectStoreNames.contains("meta")) d.createObjectStore("meta", { keyPath: "k" });
+      if (!d.objectStoreNames.contains("star")) d.createObjectStore("star", { keyPath: "word" });
     };
     req.onsuccess = () => { settled = true; resolve(req.result); };
     req.onerror = () => { settled = true; reject(req.error); };
@@ -1364,6 +1395,7 @@ let activeBookId = "demo-cet";
 let WORDS = [];                 // 当前词书词条数组
 let wordMap = new Map();        // word → 词条对象
 let progress = {};              // word → { lv, due, wrong, lastAt }
+let starred = {};               // word → { addAt } 生词本：加入后永不自动清除，仅用户手动移除
 let state = {                   // 每日/统计状态
   date: "", todayLearned: [], todayNew: 0,
   stats: { known: 0, recalled: 0, revealed: 0, easy: 0 },
@@ -1387,6 +1419,26 @@ function yesterdayStr() {
 function saveState() { dbPut("meta", { k: "state", v: state }); }
 function saveSettings() { dbPut("meta", { k: "settings", v: settings }); }
 function saveProgress(word) { dbPut("progress", { word, ...progress[word] }); }
+
+/* ================= 生词本 ================= */
+const STARRED_PROBE = 0.35;   // 日常任务里生词本到期词的抽取概率（降低巩固频率，但保证抽签遍历性）
+function starSet(word) {
+  if (starred[word]) return;
+  starred[word] = { addAt: Date.now() };
+  dbPut("star", { word, ...starred[word] });
+}
+async function starRemove(word) {
+  if (!starred[word]) return;
+  delete starred[word];
+  await dbDel("star", word);
+}
+async function starClearAll() {
+  starred = {};
+  await dbClear("star");
+}
+function starWords() {
+  return Object.keys(starred).sort((a, b) => starred[b].addAt - starred[a].addAt);
+}
 
 function setActiveBook(id) {
   activeBookId = id;
@@ -1468,11 +1520,17 @@ function previewNext(kind, word) {
 }
 
 /* ================= 每日任务编排 ================= */
-function dueReviewWords() {
+function dueReviewWords(starredMode) {
   const now = Date.now();
   return WORDS.map(w => w.word)
     .filter(wd => progress[wd] && progress[wd].due <= now)
-    .sort((a, b) => progress[a].due - progress[b].due);
+    .sort((a, b) => progress[a].due - progress[b].due)
+    .filter(wd => {
+      if (starredMode === "all") return true;
+      // 生词本词在日常复习中降频：按固定概率抽签，避免高频重现引起疲劳
+      if (starred[wd] && Math.random() >= STARRED_PROBE) return false;
+      return true;
+    });
 }
 function freshNewWords() {
   const quota = Math.max(0, newPerDay() - state.todayNew);
@@ -1491,6 +1549,20 @@ function buildDayPlan() {
 }
 function dayPlanLeft() { return buildDayPlan().length; }
 
+/* 生词本专属测试池：全量生词轮转（不要求到期，用户随时可主动巩固） */
+let starPool = [];
+function buildStarQueue() {
+  sessionMode = "star";
+  if (!starPool.length) starPool = shuffleArr(starWords().slice());
+  const batch = starPool.slice(0, BATCH);
+  starPool = starPool.slice(BATCH);
+  queue = batch.map(wd => ({ word: wd, type: progress[wd] ? "review" : "new" }));
+  cur = 0;
+  pendingKind = null;
+  misjudged = false;
+  phase = queue.length ? "self" : "done";
+}
+
 /* ================= 会话状态 ================= */
 let queue = [];
 let cur = 0;
@@ -1498,8 +1570,10 @@ let phase = "self";
 let pendingKind = null;
 let misjudged = false;
 let interacted = false;
+let sessionMode = "daily";   // daily：日常任务 | star：生词本测试
 
 function buildQueue(force) {
+  sessionMode = "daily";
   let plan = buildDayPlan();
   if (force && plan.length === 0) {
     const fresh = WORDS.map(w => w.word)
@@ -1512,6 +1586,7 @@ function buildQueue(force) {
   pendingKind = null;
   phase = queue.length ? "self" : "done";
 }
+/* 生词本测试在 buildStarQueue（见每日任务编排区）中处理 */
 
 /* ================= TTS（M5：英美音切换） ================= */
 let voicesCache = [];
@@ -1703,6 +1778,7 @@ function showWelcome(focusStart) {
   studyStage.style.display = "none";
   dayMeta.classList.remove("on");
   backHomeBtn.classList.remove("on");
+  exitStarSession(shownFromStar);
   const plan = buildDayPlan();
   const dueN = plan.filter(t => t.type === "review").length;
   const newN = plan.filter(t => t.type === "new").length;
@@ -1717,6 +1793,7 @@ function showWelcome(focusStart) {
   const noTask = plan.length === 0;
   btn.firstChild.textContent = noTask ? "今日任务已完成" : (dueN > 0 ? `开始 · ${dueN} 个复习 + ${newN} 个新词` : "开始背单词");
   if (focusStart !== false) setTimeout(() => btn.focus(), 100);
+  updateStarButtons();
 }
 function showStudy() {
   welcomeStage.style.display = "none";
@@ -1730,12 +1807,46 @@ function showStudy() {
     if (nw) setTimeout(() => speak(nw.word, false), 400);
   }
 }
+/* 生词本测试入口：从首页/统计页记录来源，返回时正确还原 */
+let shownFromStar = false;
+function showStarStudy() {
+  const n = starWords().length;
+  if (!n) return;
+  if (!confirm(`开始生词本测试？共 ${n} 个生词，每组最多 ${BATCH} 个，测完可继续下一组。`)) return;
+  shownFromStar = true;
+  welcomeStage.style.display = "none";
+  studyStage.style.display = "flex";
+  dayMeta.classList.add("on");
+  backHomeBtn.classList.add("on");
+  buildStarQueue();
+  render();
+  if (phase === "self" && interacted) {
+    const nw = wordMap.get(queue[cur].word);
+    if (nw) setTimeout(() => speak(nw.word, false), 400);
+  }
+}
+function exitStarSession(fromStar) {
+  if (!fromStar) return;
+  shownFromStar = false;
+  sessionMode = "daily";   // 回到首页时恢复日常上下文，首页数据走 showWelcome 重算
+}
 document.getElementById("btnStart").addEventListener("click", () => {
   interacted = true;
   showStudy();
 });
+/* 生词本测试按钮：首页 + 抽屉统计页各一个 */
+const btnStarTestHero = document.getElementById("btnStarTestHero");
+const btnStarTestPanel = document.getElementById("btnStarTestPanel");
+function updateStarButtons() {
+  const n = starWords().length;
+  document.querySelectorAll(".star-count").forEach(el => { el.textContent = n; });
+  btnStarTestHero.disabled = btnStarTestPanel.disabled = n === 0;
+}
+btnStarTestHero.addEventListener("click", showStarStudy);
+btnStarTestPanel.addEventListener("click", showStarStudy);
 backHomeBtn.addEventListener("click", () => {
   speechSynthesis.cancel();
+  sessionMode = "daily";   // 学习中途返回：放弃生词本模式，恢复日常队列
   showWelcome();
 });
 document.getElementById("brandHome").addEventListener("click", e => {
@@ -1801,6 +1912,7 @@ function openProfile() {
   updateProfileData();
   renderBookList();
   updateAccentUI();
+  renderStarList();
   closeWordList();
   profilePanel.classList.add("open");
   profileOverlay.classList.add("open");
@@ -1861,6 +1973,36 @@ for (const [id, kind] of [["statTotalBox", "total"], ["statTodayBox", "today"], 
   el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openWordList(kind); } });
 }
 document.getElementById("wlBack").addEventListener("click", closeWordList);
+
+/* ---- 生词本管理列表：查看 / 单个移除 / 清空；不主动清除则一直保留 ---- */
+function renderStarList() {
+  const body = document.getElementById("starBody");
+  const list = starWords();
+  if (!list.length) {
+    body.innerHTML = `<div class="wl-empty">生词本还是空的。<br>学习中选出「不认识 / 忘了」的词会自动收进来。</div>`;
+  } else {
+    body.innerHTML = list.map(word => `
+      <div class="wl-item">
+        <span class="wl-word">${esc(word)}</span>
+        <span class="wl-mean">${esc(wordMean(word))}</span>
+        <button class="book-del" data-star-del="${esc(word)}" aria-label="移出生词本 ${esc(word)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>`).join("");
+  }
+  document.getElementById("btnStarClear").style.display = list.length ? "" : "none";
+  updateStarButtons();
+}
+document.getElementById("starBody").addEventListener("click", async e => {
+  const btn = e.target.closest("[data-star-del]");
+  if (!btn) return;
+  await starRemove(btn.dataset.starDel);
+  renderStarList();
+});
+document.getElementById("btnStarClear").addEventListener("click", async () => {
+  if (!starWords().length) return;
+  if (!confirm(`确定清空生词本（共 ${starWords().length} 词）吗？学习进度保留，只是不再单独重测。`)) return;
+  await starClearAll();
+  renderStarList();
+});
 avatarBtn.addEventListener("click", () => {
   profilePanel.classList.contains("open") ? closeProfile() : openProfile();
 });
@@ -1898,6 +2040,7 @@ function updateProfileData() {
   document.getElementById("statRevealed").textContent = s.revealed;
   document.getElementById("statEasy").textContent = s.easy;
   document.getElementById("profileDays").textContent = `第 ${days} 天`;
+  updateStarButtons();
 }
 
 /* ---- 口音与朗读方式切换 ---- */
@@ -1960,6 +2103,7 @@ document.getElementById("bookList").addEventListener("click", async e => {
       await dbDel("progress", w.word);
     }
   }
+  // 生词本记录刻意保留：与词书解耦，用户不手动移除就一直存在
   if (activeBookId === id) setActiveBook(books[0] ? books[0].id : "");
   renderBookList();
   showWelcome();
@@ -9379,9 +9523,10 @@ async function confirmImport() {
 /* ================= 备份导出 / 导入 ================= */
 document.getElementById("btnExportAll").addEventListener("click", async () => {
   const data = {
-    v: 1, exportedAt: new Date().toISOString(),
+    v: 2, exportedAt: new Date().toISOString(),
     books,
     progress: Object.keys(progress).map(w => ({ word: w, ...progress[w] })),
+    starred: starWords().map(w => ({ word: w, addAt: starred[w].addAt })),
     state, settings, activeBookId
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -9410,6 +9555,7 @@ document.getElementById("fileBackup").addEventListener("change", e => {
       await dbClear("books");
       await dbClear("progress");
       await dbClear("meta");
+      await dbClear("star");
       books = [];
       for (const b of data.books) {
         const book = { id: b.id || "book-" + Math.random().toString(36).slice(2), name: b.name || "未命名词书", words: b.words || [], createdAt: b.createdAt || Date.now() };
@@ -9422,6 +9568,13 @@ document.getElementById("fileBackup").addEventListener("change", e => {
         if (p && p.word) {
           progress[p.word] = { lv: p.lv || 0, due: p.due || 0, wrong: p.wrong || 0, lastAt: p.lastAt || 0 };
           await dbPut("progress", { word: p.word, ...progress[p.word] });
+        }
+      }
+      starred = {};
+      for (const s of (data.starred || [])) {
+        if (s && s.word) {
+          starred[s.word] = { addAt: s.addAt || Date.now() };
+          await dbPut("star", { word: s.word, ...starred[s.word] });
         }
       }
       state = data.state || { date: todayStr(), todayLearned: [], todayNew: 0, stats: { known: 0, recalled: 0, revealed: 0, easy: 0 }, firstDate: todayStr(), lastDate: todayStr(), streak: 1 };
@@ -9507,8 +9660,29 @@ function nextDueInfo() {
   return Math.round(ms / 864e5) + " 天后";
 }
 
+/* 生词本测试的完成页：本组小计 + 生词本规模与入口，避免与每日任务口径混淆 */
+function renderStarDone() {
+  const answered = state.stats.known + state.stats.recalled + state.stats.revealed;
+  const acc = answered ? Math.round((state.stats.known + state.stats.recalled) / answered * 100) : 0;
+  cardEl.innerHTML = `
+  <div class="done-card">
+    <div class="done-mark">${ICON_CHECK}</div>
+    <div class="done-title">生词本测试完成</div>
+    <div class="done-sub">生词本共 ${starWords().length} 个词，日常学习中会低频巩固。可再来一组或回到首页。</div>
+    <div class="stat-grid">
+      <div class="stat-cell"><div class="stat-num">${acc}%</div><div class="stat-label">本轮正确率</div></div>
+      <div class="stat-cell"><div class="stat-num">${starWords().length}</div><div class="stat-label">生词本词汇</div></div>
+    </div>
+    <div class="done-actions">
+      ${starWords().length ? `<button class="btn btn-primary" data-act="nextBatch">再测一组</button>` : ""}
+      <button class="btn btn-ghost" data-act="backHome">回到首页</button>
+    </div>
+  </div>`;
+}
+
 function render() {
   if (phase === "done") {
+    if (sessionMode === "star") { renderStarDone(); renderTop(); return; }
     const left = dayPlanLeft();
     const allDone = WORDS.every(w => progress[w.word]) && left === 0;
     const bonusAvail = left === 0 && WORDS.some(w => !progress[w.word]);
@@ -9658,6 +9832,7 @@ function render() {
   cardEl.innerHTML = `
     ${corner}
     <span class="stage-chip">${phase === "self" ? (isReview ? PHASE_LABEL.selfReview : PHASE_LABEL.selfNew) : PHASE_LABEL[phase]}</span>
+    ${starred[t.word] ? `<span class="star-chip">生词本${sessionMode === "star" ? '<span class="retest-note"> · 独立重测</span>' : ""}</span>` : ""}
     ${inner}
     ${phase === "self" ? actions : `<div class="actions">${actions}</div>`}
     ${kbd}`;
@@ -9668,7 +9843,13 @@ function render() {
 }
 
 function renderTop() {
-  document.getElementById("dayNum").textContent = state.todayLearned.length;
+  const inStar = sessionMode === "star";
+  const wrap = document.getElementById("dayNumWrap");
+  if (inStar) {
+    wrap.textContent = `生词本测试 · ${starWords().length} 词`;
+  } else {
+    wrap.innerHTML = `今日已学 <b id="dayNum">${state.todayLearned.length}</b> 词`;
+  }
   const total = Math.max(1, Math.min(queue.length, 10));
   const doneN = phase === "done" ? total : cur;
   document.getElementById("dots").innerHTML = Array.from({ length: total }, (_, i) =>
@@ -9680,8 +9861,10 @@ function renderTop() {
 function finishWord(kind) {
   const t = queue[cur];
   const p = applyResult(t.word, kind);
-  if (t.type === "new") state.todayNew++;
-  state.todayLearned.push(t.word);
+  if (sessionMode !== "star") {           // 生词本测试不占每日配额与今日学习记录
+    if (t.type === "new") state.todayNew++;
+    state.todayLearned.push(t.word);
+  }
   state.stats[kind] = (state.stats[kind] || 0) + 1;
   saveState();
   if (kind === "revealed" && !t.requeued && p.due - Date.now() < 864e5) {
@@ -9709,7 +9892,7 @@ async function restartBook() {
   state.todayLearned = [];
   state.todayNew = 0;
   saveState();
-  buildQueue();
+  if (sessionMode === "star") buildStarQueue(); else buildQueue();
   render();
 }
 
@@ -9718,17 +9901,26 @@ function handle(act) {
   switch (act) {
     case "know":    pendingKind = "known";    phase = "detail"; render(); break;
     case "easy":    finishWord("easy"); break;
-    case "dont":    phase = "hint1"; render(); break;
-    case "still":   phase = "hint2"; render(); break;
+    case "dont":    starCaptureCurrent(); phase = "hint1"; render(); break;
+    case "still":   starCaptureCurrent(); phase = "hint2"; render(); break;
     case "recall":  pendingKind = "recalled"; phase = "detail"; render(); break;
     case "giveup":  phase = "reveal"; render(); break;
     case "detail":  pendingKind = "revealed"; phase = "detail"; render(); break;
-    case "misjudge": pendingKind = "revealed"; misjudged = true; render(); break;
+    case "misjudge": starCaptureCurrent(); pendingKind = "revealed"; misjudged = true; render(); break;
     case "next":    finishWord(pendingKind || "revealed"); break;
-    case "nextBatch": buildQueue(true); render(); break;
-    case "backHome": showWelcome(); break;
+    case "nextBatch": sessionMode === "star" ? buildStarQueue() : buildQueue(true); render(); break;
+    case "backHome": exitStarSession(shownFromStar); showWelcome(); break;
     case "restart": restartBook(); break;
   }
+}
+
+/* 自评「不认识/忘了」→ 生词本捕获（首次出现，之前从未轮到过的词） */
+function starCaptureCurrent() {
+  if (sessionMode === "star") return;                 // 生词本测试内不再重复登记
+  const t = queue[cur];
+  if (!t) return;
+  if (progress[t.word] || state.todayLearned.includes(t.word)) return;  // 只捕获首次出现的词
+  starSet(t.word);
 }
 
 cardEl.addEventListener("click", e => {
@@ -9802,6 +9994,9 @@ document.addEventListener("keydown", e => {
   const progressRows = await dbAll("progress");
   progress = {};
   for (const row of progressRows) progress[row.word] = { lv: row.lv, due: row.due, wrong: row.wrong, lastAt: row.lastAt };
+  const starRows = await dbAll("star");
+  starred = {};
+  for (const row of starRows) starred[row.word] = { addAt: row.addAt || 0 };
   await migrateFromM3();
   rolloverIfNeeded();
   const savedActive = metaMap.get("activeBookId");
