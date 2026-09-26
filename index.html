@@ -1061,6 +1061,17 @@ button:focus-visible, a:focus-visible {
 .video-tools .mini-btn { flex: 0 0 auto; padding: 0 18px; }
 .video-score { margin-left: auto; font-family: var(--serif); font-size: 14px; font-weight: 700; color: var(--green); }
 .video-hint { margin-top: 10px; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+.link-panel { margin-top: 12px; display: grid; gap: 8px; }
+.link-panel[hidden] { display: none; }
+.link-panel .link-input { min-height: 40px; font-size: 13px; border-radius: 10px; background: var(--cream); }
+.link-actions { display: flex; gap: 8px; }
+.link-actions .mini-btn { flex: 0 0 auto; padding: 0 18px; }
+.lib-item { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px dashed var(--line); }
+.lib-item:last-child { border-bottom: none; }
+.lib-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--ink); }
+.lib-meta { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
+.lib-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.lib-empty { text-align: center; padding: 22px 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.7; }
 .dub-panel { margin-top: 14px; padding: 14px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--cream); }
 .dub-panel[hidden] { display: none; }
 .dub-line { margin-bottom: 10px; font-size: 14px; line-height: 1.7; color: var(--ink); }
@@ -1289,8 +1300,23 @@ button:focus-visible, a:focus-visible {
       <div class="video-tools">
         <button class="mini-btn primary" id="btnPickVideo">导入视频</button>
         <button class="mini-btn" id="btnPickSub">导入字幕</button>
+        <button class="mini-btn" id="btnLinkImport" aria-expanded="false">链接导入</button>
+        <button class="mini-btn" id="btnLibToggle" aria-expanded="false">视频库</button>
       </div>
-      <p class="video-hint" id="videoHint">点「导入视频」选择文件，或直接把视频拖到本页。导入后自动检测内嵌字幕；没有内嵌字幕就再导入配套的 .srt / .vtt 字幕文件。点字幕选一句 → 听原声 → 录音跟读，系统会给出与原声的相似度评分。</p>
+      <div class="link-panel" id="libPanel" hidden>
+        <div class="wl-scroll" id="libBody"></div>
+        <p class="video-hint">视频库自动保存最近导入的 3 个视频（单个 ≤150MB），重开页面也能一键载入；仅存本机，不进备份文件。手机上点「导入视频」可直接从系统相册选取视频。</p>
+      </div>
+      <div class="link-panel" id="linkPanel" hidden>
+        <input class="modal-input link-input" id="videoUrlInput" type="url" placeholder="视频直链：https://…/video.mp4" autocomplete="off">
+        <input class="modal-input link-input" id="subUrlInput" type="url" placeholder="字幕链接（可选）：https://…/subtitle.srt" autocomplete="off">
+        <div class="link-actions">
+          <button class="mini-btn primary" id="btnLinkGo">载入</button>
+          <button class="mini-btn" id="btnLinkCancel">收起</button>
+        </div>
+        <p class="video-hint">支持 mp4 / webm 等媒体直链；视频网站页面地址（B 站 / YouTube 页面）无法解析。跨域直链若未开放 CORS，能播放但读不到音轨、无法评分。</p>
+      </div>
+      <p class="video-hint" id="videoHint">三种导入方式：点「导入视频」选文件、把视频拖到本页、或用「链接导入」粘贴视频直链。导入后自动检测内嵌字幕；没有内嵌字幕就再导入（或链接载入）配套的 .srt / .vtt 字幕。点字幕选一句 → 听原声 → 录音跟读，系统会给出与原声的相似度评分。</p>
       <div class="dub-panel" id="dubPanel" hidden>
         <div class="dub-line" id="dubLine"></div>
         <div class="dub-actions">
@@ -1456,10 +1482,10 @@ const DEMO_WORDS = [
 
 /* ================= IndexedDB 数据层 ================= */
 const DB_NAME = "ciyi_db";
-const DB_VER = 2;
+const DB_VER = 3;
 let db = null;
 let dbFallback = false;          // 存储不可用（如 iOS 无痕模式）→ 仅内存运行
-const memStore = { books: new Map(), progress: new Map(), meta: new Map(), star: new Map() };
+const memStore = { books: new Map(), progress: new Map(), meta: new Map(), star: new Map(), videolib: new Map() };
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -1472,6 +1498,7 @@ function openDB() {
       if (!d.objectStoreNames.contains("progress")) d.createObjectStore("progress", { keyPath: "word" });
       if (!d.objectStoreNames.contains("meta")) d.createObjectStore("meta", { keyPath: "k" });
       if (!d.objectStoreNames.contains("star")) d.createObjectStore("star", { keyPath: "word" });
+      if (!d.objectStoreNames.contains("videolib")) d.createObjectStore("videolib", { keyPath: "id" });
     };
     req.onsuccess = () => { settled = true; resolve(req.result); };
     req.onerror = () => { settled = true; reject(req.error); };
@@ -1488,7 +1515,7 @@ function dbAll(store) {
   });
 }
 function dbPut(store, val) {
-  if (dbFallback) { memStore[store].set(val[store === "meta" ? "k" : store === "books" ? "id" : "word"], val); return Promise.resolve(); }
+  if (dbFallback) { memStore[store].set(val[store === "meta" ? "k" : store === "books" || store === "videolib" ? "id" : "word"], val); return Promise.resolve(); }
   return new Promise((resolve, reject) => {
     const rq = db.transaction(store, "readwrite").objectStore(store).put(val);
     rq.onsuccess = () => resolve();
@@ -9926,6 +9953,7 @@ let videoScores = {};           // { 视频key: { "起始秒": 最高分 } }
 let audioCtx = null;
 let playUntil = null;           // 「听原声」自动停点
 let micStream = null, mediaRecorder = null, recChunks = [], recTimer = null, recIdx = -1, recCancelled = false;
+let refLoadMsg = "";            // 原声解析失败的提示（避免被内嵌字幕兜底提示覆盖）
 
 function setVideoHint(msg) { document.getElementById("videoHint").textContent = msg; }
 function stopVideoSpeech() {
@@ -9958,7 +9986,7 @@ document.getElementById("btnVideo").addEventListener("click", showVideoStage);
 /* ---- 导入视频 ---- */
 document.getElementById("btnPickVideo").addEventListener("click", () => document.getElementById("fileVideo").click());
 document.getElementById("btnPickSub").addEventListener("click", () => document.getElementById("fileSub").click());
-/* ---- 导入视频（文件选择 / 拖拽共用） ---- */
+/* ---- 导入视频（文件选择 / 拖拽 / 视频库 共用） ---- */
 function importVideoFile(f) {
   if (videoObjUrl) URL.revokeObjectURL(videoObjUrl);
   videoObjUrl = URL.createObjectURL(f);
@@ -9972,6 +10000,7 @@ function importVideoFile(f) {
   setVideoHint("已导入视频，正在检测内嵌字幕与解析原声音轨…");
   videoEl.load();
   loadRefAudio(f);
+  addToVideoLib(f);
 }
 document.getElementById("fileVideo").addEventListener("change", e => {
   const f = e.target.files[0];
@@ -10001,18 +10030,20 @@ document.getElementById("fileVideo").addEventListener("change", e => {
 /* 解析视频音轨（用于和录音比对）：解码后统一重采样成 16kHz 单声道 */
 async function loadRefAudio(file) {
   if (file.size > 400 * 1024 * 1024) {
-    setVideoHint("视频超过 400MB，为节省内存未解析原声，跟读评分不可用（仍可听原声）。");
+    refLoadMsg = "视频超过 400MB，为节省内存未解析原声，跟读评分不可用。";
+    setVideoHint(refLoadMsg);
     return;
   }
   try {
     const ab = await file.arrayBuffer();
     const buf = await getAudioCtx().decodeAudioData(ab);
     refSamples = await toMono16k(buf);
-    if (refSamples && refSamples.length > 1600) setVideoHint("原声已就绪：点字幕选一句，听原声后录音跟读，系统给出相似度评分。");
-    else { refSamples = null; setVideoHint("未解析到有效音轨（视频可能没有声音），跟读评分不可用。"); }
+    if (refSamples && refSamples.length > 1600) { refLoadMsg = ""; setVideoHint("原声已就绪：点字幕选一句，听原声后录音跟读，系统给出相似度评分。"); }
+    else { refSamples = null; refLoadMsg = "未解析到有效音轨（视频可能没有声音），跟读评分不可用。"; setVideoHint(refLoadMsg); }
   } catch (err) {
     refSamples = null;
-    setVideoHint("未能解析该视频的音轨（浏览器不支持此音频编码），跟读评分不可用；仍可听原声与用示范朗读对照。");
+    refLoadMsg = "未能解析该视频的音轨（浏览器不支持此音频编码），跟读评分不可用；仍可听原声与用示范朗读对照。";
+    setVideoHint(refLoadMsg);
   }
 }
 function toMono16k(buf) {
@@ -10072,7 +10103,9 @@ function harvestEmbedded() {
   } else embedFallbackHint();
 }
 function embedFallbackHint() {
-  if (!cues.length) setVideoHint("未检测到内嵌字幕。点「导入字幕」选择 .srt / .vtt 字幕文件，导入后即可逐句跟读评分。");
+  if (!cues.length) {
+    setVideoHint("未检测到内嵌字幕。点「导入字幕」选择 .srt / .vtt 字幕文件，导入后即可逐句跟读评分。" + (refLoadMsg ? " " + refLoadMsg : ""));
+  }
 }
 
 /* ---- 字幕来源：外部 srt / vtt 文件 ---- */
@@ -10102,17 +10135,18 @@ function parseSubtitle(text) {
   }
   return list.sort((a, b) => a.start - b.start);
 }
-/* ---- 导入字幕（文件选择 / 拖拽共用）：UTF-8 优先，回退 GBK ---- */
+/* ---- 导入字幕（文件选择 / 拖拽 / 链接 共用）：UTF-8 优先，回退 GBK ---- */
+function decodeSubtitleBytes(ab) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(ab); }
+  catch (err) {
+    try { return new TextDecoder("gbk").decode(ab); }
+    catch (err2) { return new TextDecoder("utf-8").decode(ab); }
+  }
+}
 function importSubtitleFile(f) {
   const reader = new FileReader();
   reader.onload = () => {
-    let text;
-    try { text = new TextDecoder("utf-8", { fatal: true }).decode(reader.result); }
-    catch (err) {
-      try { text = new TextDecoder("gbk").decode(reader.result); }
-      catch (err2) { text = new TextDecoder("utf-8").decode(reader.result); }
-    }
-    const list = parseSubtitle(text);
+    const list = parseSubtitle(decodeSubtitleBytes(reader.result));
     if (!list.length) { setVideoHint("字幕解析失败：没有找到有效的时间轴条目（支持 .srt / .vtt）。"); return; }
     cues = list; cueIdx = -1; selIdx = -1; renderSubList();
     selectCue(0);
@@ -10462,6 +10496,151 @@ function speakLineZh(text) {
   }
   playAudioSrc(sentenceTtsUrl(text, "zh"));
 }
+
+/* ---- 链接导入：视频直链 + 可选字幕链接 ---- */
+document.getElementById("btnLinkImport").addEventListener("click", () => {
+  const p = document.getElementById("linkPanel");
+  p.hidden = !p.hidden;
+  document.getElementById("btnLinkImport").setAttribute("aria-expanded", p.hidden ? "false" : "true");
+  if (!p.hidden) document.getElementById("videoUrlInput").focus();
+});
+document.getElementById("btnLinkCancel").addEventListener("click", () => {
+  document.getElementById("linkPanel").hidden = true;
+  document.getElementById("btnLinkImport").setAttribute("aria-expanded", "false");
+});
+function shortUrlLabel(u) {
+  try {
+    const x = new URL(u);
+    const seg = x.pathname.split("/").filter(Boolean).pop() || "";
+    return x.host + "/…/" + decodeURIComponent(seg);
+  } catch (e) { return u.slice(0, 60); }
+}
+async function importVideoUrl(url) {
+  if (!/^https?:\/\//i.test(url)) { setVideoHint("链接需以 http:// 或 https:// 开头。"); return; }
+  if (videoObjUrl) { URL.revokeObjectURL(videoObjUrl); videoObjUrl = null; }
+  videoEl.removeAttribute("crossorigin");
+  videoEl.src = url;
+  videoKey = "url|" + url;
+  document.getElementById("videoFileName").textContent = shortUrlLabel(url);
+  cues = []; cueIdx = -1; selIdx = -1; refSamples = null;
+  hideDubPanel(); renderSubList(); updateScoreSummary();
+  setVideoHint("已载入链接，正在读取视频信息与音轨…");
+  videoEl.load();
+  loadRefAudioFromUrl(url);
+}
+async function loadRefAudioFromUrl(url) {
+  try {
+    const resp = await fetch(url, { mode: "cors" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const len = Number(resp.headers.get("content-length") || 0);
+    if (len > 400 * 1024 * 1024) {
+      refLoadMsg = "该视频超过 400MB，为节省内存未解析原声，跟读评分不可用。";
+      setVideoHint(refLoadMsg);
+      return;
+    }
+    const ab = await resp.arrayBuffer();
+    const buf = await getAudioCtx().decodeAudioData(ab);
+    refSamples = await toMono16k(buf);
+    if (refSamples && refSamples.length > 1600) { refLoadMsg = ""; setVideoHint("链接视频与原声已就绪：点字幕选一句，听原声后录音跟读。"); }
+    else { refSamples = null; refLoadMsg = "链接视频未解析到有效音轨（可能没有声音），跟读评分不可用。"; setVideoHint(refLoadMsg); }
+  } catch (err) {
+    refSamples = null;
+    refLoadMsg = "该链接不允许跨域读取音轨（CORS 限制）：视频可以播放，但跟读评分不可用。需要评分请用本地文件导入。";
+    setVideoHint(refLoadMsg);
+  }
+}
+async function importSubtitleUrl(url) {
+  if (!/^https?:\/\//i.test(url)) { setVideoHint("字幕链接需以 http:// 或 https:// 开头。"); return; }
+  try {
+    const resp = await fetch(url, { mode: "cors" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const list = parseSubtitle(decodeSubtitleBytes(await resp.arrayBuffer()));
+    if (!list.length) { setVideoHint("字幕链接内容解析失败：没有有效的时间轴条目。"); return; }
+    cues = list; cueIdx = -1; selIdx = -1; renderSubList();
+    selectCue(0);
+    setVideoHint(`已从链接载入字幕 ${list.length} 条，点「听原声」「录音跟读」即可逐句练习。`);
+  } catch (err) {
+    setVideoHint("字幕链接读取失败（可能不允许跨域）。可改用「导入字幕」选择本地文件。");
+  }
+}
+document.getElementById("btnLinkGo").addEventListener("click", async () => {
+  const vurl = document.getElementById("videoUrlInput").value.trim();
+  const surl = document.getElementById("subUrlInput").value.trim();
+  if (!vurl && !surl) { setVideoHint("请先填写视频直链或字幕链接。"); return; }
+  if (vurl) await importVideoUrl(vurl);
+  if (surl) await importSubtitleUrl(surl);
+});
+["videoUrlInput", "subUrlInput"].forEach(id => {
+  document.getElementById(id).addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); document.getElementById("btnLinkGo").click(); }
+  });
+});
+
+/* ---- 视频库：最近导入的视频存 IndexedDB，重开页面可一键载入 ---- */
+const LIB_MAX = 3, LIB_MAX_SIZE = 150 * 1024 * 1024;
+let videoLib = [];
+document.getElementById("btnLibToggle").addEventListener("click", () => {
+  const p = document.getElementById("libPanel");
+  p.hidden = !p.hidden;
+  document.getElementById("btnLibToggle").setAttribute("aria-expanded", p.hidden ? "false" : "true");
+  if (!p.hidden) renderVideoLib();
+});
+function fmtSize(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / 1024 / 1024 / 1024).toFixed(1) + " GB";
+  if (bytes >= 1024 * 1024) return Math.round(bytes / 1024 / 1024) + " MB";
+  return Math.max(1, Math.round(bytes / 1024)) + " KB";
+}
+function renderVideoLib() {
+  const body = document.getElementById("libBody");
+  if (!videoLib.length) {
+    body.innerHTML = `<div class="lib-empty">视频库还是空的。<br>导入视频后会自动存入最近 3 个，重开页面可直接载入。</div>`;
+    return;
+  }
+  body.innerHTML = videoLib.map(v => `
+    <div class="lib-item">
+      <span class="lib-name">${esc(v.name)}</span>
+      <span class="lib-meta">${fmtSize(v.size)}</span>
+      <span class="lib-actions">
+        <button class="mini-btn primary" data-lib-load="${esc(v.id)}">载入</button>
+        <button class="mini-btn" data-lib-del="${esc(v.id)}" aria-label="从视频库删除 ${esc(v.name)}">删除</button>
+      </span>
+    </div>`).join("");
+}
+async function addToVideoLib(file) {
+  if (!(file instanceof Blob) || file.size > LIB_MAX_SIZE) return;
+  const dup = videoLib.findIndex(v => v.name === file.name && v.size === file.size);
+  if (dup !== -1) {
+    videoLib[dup].addedAt = Date.now();
+    videoLib.sort((a, b) => b.addedAt - a.addedAt);
+    await dbPut("videolib", videoLib[dup]);
+    renderVideoLib();
+    return;
+  }
+  const entry = { id: "v" + Date.now(), name: file.name, size: file.size, addedAt: Date.now(), blob: file };
+  videoLib.unshift(entry);
+  while (videoLib.length > LIB_MAX) {
+    const rm = videoLib.pop();
+    await dbDel("videolib", rm.id);
+  }
+  try { await dbPut("videolib", entry); }
+  catch (e) { videoLib = videoLib.filter(x => x.id !== entry.id); }   // 配额不足则放弃保存
+  renderVideoLib();
+}
+document.getElementById("libBody").addEventListener("click", async e => {
+  const loadBtn = e.target.closest("[data-lib-load]");
+  if (loadBtn) {
+    const entry = videoLib.find(v => v.id === loadBtn.dataset.libLoad);
+    if (entry && entry.blob) importVideoFile(new File([entry.blob], entry.name, { type: entry.blob.type || "video/mp4" }));
+    return;
+  }
+  const delBtn = e.target.closest("[data-lib-del]");
+  if (delBtn) {
+    const id = delBtn.dataset.libDel;
+    videoLib = videoLib.filter(v => v.id !== id);
+    await dbDel("videolib", id);
+    renderVideoLib();
+  }
+});
 
 /* ================= 演示工具 ================= */
 document.getElementById("demoTomorrow").addEventListener("click", async () => {
@@ -10869,6 +11048,7 @@ document.addEventListener("keydown", e => {
   for (const row of starRows) starred[row.word] = { addAt: row.addAt || 0 };
   dailyLog = metaMap.get("dailyLog") || {};
   videoScores = metaMap.get("videoScores") || {};
+  videoLib = (await dbAll("videolib")).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
   if (state.todayLearned && state.todayLearned.length && !dailyLog[state.date]) {
     // 老数据补录：把今日已学并入每日记录
     dailyLog[state.date] = state.todayLearned.slice();
