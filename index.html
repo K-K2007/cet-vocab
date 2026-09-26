@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>词驿 · 四六级单词</title>
 <meta name="theme-color" content="#faf8f5">
-<meta name="description" content="词驿 —— 四六级 / 考研单词记忆工具，双选模式、间隔重复、词书导入、发音例句。">
+<meta name="description" content="词驿 —— 四六级 / 考研单词记忆工具，双选模式、按天复习、词书导入、发音例句。">
 <meta name="format-detection" content="telephone=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -285,6 +285,10 @@ button:focus-visible, a:focus-visible {
 .wl-mean { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
 .wl-badge { flex-shrink: 0; font-size: 10px; letter-spacing: 1px; padding: 1px 7px; border-radius: 5px; background: var(--light); color: var(--ink-3); white-space: nowrap; }
 .wl-badge.star { background: var(--accent-soft); color: var(--accent); }
+.wl-badge.go { background: var(--dark); color: var(--cream); }
+.wl-item.day-item { cursor: pointer; border-radius: 8px; padding-left: 6px; padding-right: 6px; }
+.wl-item.day-item:hover { background: var(--light); }
+.day-date { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .wl-controls { display: grid; gap: 10px; margin-bottom: 14px; }
 .wl-controls[hidden] { display: none; }
 .wl-controls .accent-seg button { min-height: 36px; font-size: 12px; letter-spacing: 1px; }
@@ -1141,6 +1145,10 @@ button:focus-visible, a:focus-visible {
     <button class="wl-clear-btn" id="btnStarClear">清空生词本</button>
   </div>
   <div class="profile-section">
+    <div class="profile-section-title">按天复习</div>
+    <div class="wl-scroll" id="dayLogBody"></div>
+  </div>
+  <div class="profile-section">
     <div class="profile-section-title">学习分布</div>
     <ul class="profile-list">
       <li><span>一眼认识</span><span class="val" id="statKnown">0</span></li>
@@ -1176,7 +1184,7 @@ button:focus-visible, a:focus-visible {
   <div class="profile-section">
     <div class="profile-section-title">演示工具</div>
     <button class="demo-btn" id="demoTomorrow">模拟隔天 · 让已学词全部到期</button>
-    <p class="demo-note">用于验证间隔复习：点击后刷新页面，到期词将出现在今日任务中。</p>
+    <p class="demo-note">点击后刷新页面，所有已学词进入待复习状态，可在统计里查看。</p>
   </div>
   </div>
 </aside>
@@ -1212,7 +1220,7 @@ button:focus-visible, a:focus-visible {
     <div class="pill-wrap animate-fade-up stagger-2" id="pillWrap">
       <button class="pill" id="planPillBtn" aria-haspopup="dialog" aria-expanded="false" aria-label="学习计划与词书设置">
         <span class="pill-dot"></span>
-        <span id="heroPill">四六级高频词 · 每日 10 词 · 间隔重复</span>
+        <span id="heroPill">四六级高频词 · 每日 10 词 · 按天复习</span>
         <svg class="pill-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
       </button>
       <div class="plan-pop" id="planPop" role="dialog" aria-label="学习计划设置">
@@ -1235,8 +1243,8 @@ button:focus-visible, a:focus-visible {
       把单词，<br>变成<em>长期记忆</em>。
     </h1>
     <p class="hero-sub animate-fade-up stagger-4">
-      先回忆，再确认。到期的词会自动回到今天的队列：记得就拉长间隔，
-      忘了就当天重现，沿着遗忘曲线把每个词送进长期记忆。
+      每天只学没出现过的词，学过的不会自动重测。想复习时，到「按天复习」里挑一天回顾——
+      每天学过的词都记在本机，随时可以重来。
     </p>
     <div class="hero-cta-row animate-fade-up stagger-5">
       <button class="btn-hero" id="btnStart">
@@ -1266,7 +1274,7 @@ button:focus-visible, a:focus-visible {
         </div>
         <div>
           <div class="hstat-num"><span id="previewDue">0</span></div>
-          <div class="hstat-label">今日待复习</div>
+          <div class="hstat-label">待复习</div>
         </div>
         <div>
           <div class="hstat-num" id="previewNew">10</div>
@@ -1409,6 +1417,7 @@ let WORDS = [];                 // 当前词书词条数组
 let wordMap = new Map();        // word → 词条对象
 let progress = {};              // word → { lv, due, wrong, lastAt }
 let starred = {};               // word → { addAt } 生词本：加入后永不自动清除，仅用户手动移除
+let dailyLog = {};              // "YYYY-MM-DD" → [word] 每日学习记录，按天复习的数据源
 let state = {                   // 每日/统计状态
   date: "", todayLearned: [], todayNew: 0,
   stats: { known: 0, recalled: 0, revealed: 0, easy: 0 },
@@ -1434,7 +1443,6 @@ function saveSettings() { dbPut("meta", { k: "settings", v: settings }); }
 function saveProgress(word) { dbPut("progress", { word, ...progress[word] }); }
 
 /* ================= 生词本 ================= */
-const STARRED_PROBE = 0.35;   // 日常任务里生词本到期词的抽取概率（降低巩固频率，但保证抽签遍历性）
 function starSet(word) {
   if (starred[word]) return;
   starred[word] = { addAt: Date.now() };
@@ -1451,6 +1459,21 @@ async function starClearAll() {
 }
 function starWords() {
   return Object.keys(starred).sort((a, b) => starred[b].addAt - starred[a].addAt);
+}
+
+/* ================= 每日学习记录（按天复习） ================= */
+function logDailyWord(word) {
+  const d = state.date || todayStr();
+  const arr = dailyLog[d] || (dailyLog[d] = []);
+  if (arr.includes(word)) return;
+  arr.push(word);
+  dbPut("meta", { k: "dailyLog", v: dailyLog });
+}
+function dayLogDates() {
+  return Object.keys(dailyLog).filter(d => (dailyLog[d] || []).length).sort().reverse();
+}
+function dayLogWords(date) {
+  return (dailyLog[date] || []).filter(wd => entryOf(wd));
 }
 
 function setActiveBook(id) {
@@ -1520,45 +1543,23 @@ function applyResult(word, kind) {
   saveProgress(word);
   return p;
 }
-function previewNext(kind, word) {
-  const lv = progress[word] ? progress[word].lv : 0;
-  let next = lv;
-  if (kind === "easy") next = Math.max(lv, 4);
-  else if (kind === "known") next = Math.min(lv + 1, INTERVALS.length - 1);
-  else if (kind === "revealed") next = Math.max(1, Math.floor(lv / 2));
-  const ms = INTERVALS[next];
-  if (ms < 3600e3) return Math.round(ms / 60e3) + " 分钟后";
-  if (ms < 864e5) return Math.round(ms / 3600e3) + " 小时后";
-  return Math.round(ms / 864e5) + " 天后";
-}
 
 /* ================= 每日任务编排 ================= */
-function dueReviewWords(starredMode) {
+function dueReviewWords() {
   const now = Date.now();
   return WORDS.map(w => w.word)
     .filter(wd => progress[wd] && progress[wd].due <= now)
-    .sort((a, b) => progress[a].due - progress[b].due)
-    .filter(wd => {
-      if (starredMode === "all") return true;
-      // 生词本词在日常复习中降频：按固定概率抽签，避免高频重现引起疲劳
-      if (starred[wd] && Math.random() >= STARRED_PROBE) return false;
-      return true;
-    });
+    .sort((a, b) => progress[a].due - progress[b].due);
 }
 function freshNewWords() {
   const quota = Math.max(0, newPerDay() - state.todayNew);
   return WORDS.map(w => w.word).filter(wd => !progress[wd]).slice(0, quota);
 }
 function buildDayPlan() {
-  const due = dueReviewWords().filter(w => !state.todayLearned.includes(w));
-  const fresh = freshNewWords().filter(w => !state.todayLearned.includes(w));
-  const plan = [];
-  let di = 0, ni = 0;
-  while (di < due.length || ni < fresh.length) {
-    for (let k = 0; k < 3 && di < due.length; k++) plan.push({ word: due[di++], type: "review" });
-    if (ni < fresh.length) plan.push({ word: fresh[ni++], type: "new" });
-  }
-  return plan;
+  // 日常测试只排没出现过的词；学过的词不再自动重测，复习走「按天复习」入口
+  return freshNewWords()
+    .filter(w => !state.todayLearned.includes(w))
+    .map(w => ({ word: w, type: "new" }));
 }
 function dayPlanLeft() { return buildDayPlan().length; }
 
@@ -1566,9 +1567,26 @@ function dayPlanLeft() { return buildDayPlan().length; }
 let starPool = [];
 function buildStarQueue() {
   sessionMode = "star";
-  if (!starPool.length) starPool = shuffleArr(starWords().slice());
+  // 过滤已删词书遗留的词条，避免取不到释义无法渲染
+  if (!starPool.length) starPool = shuffleArr(starWords().filter(wd => entryOf(wd)));
   const batch = starPool.slice(0, BATCH);
   starPool = starPool.slice(BATCH);
+  queue = batch.map(wd => ({ word: wd, type: progress[wd] ? "review" : "new" }));
+  cur = 0;
+  pendingKind = null;
+  misjudged = false;
+  phase = queue.length ? "self" : "done";
+}
+
+/* 按天复习池：把某天记录下来的单词按原顺序分批重测，测完可再来一轮 */
+let dayPool = [];
+let dayReviewDate = "";
+function buildDayQueue() {
+  sessionMode = "day";
+  const all = dayLogWords(dayReviewDate);
+  if (!dayPool.length) dayPool = all.slice();
+  const batch = dayPool.slice(0, BATCH);
+  dayPool = dayPool.slice(BATCH);
   queue = batch.map(wd => ({ word: wd, type: progress[wd] ? "review" : "new" }));
   cur = 0;
   pendingKind = null;
@@ -1583,7 +1601,7 @@ let phase = "self";
 let pendingKind = null;
 let misjudged = false;
 let interacted = false;
-let sessionMode = "daily";   // daily：日常任务 | star：生词本测试
+let sessionMode = "daily";   // daily：日常任务（只测新词）| star：生词本测试 | day：按天复习
 
 function buildQueue(force) {
   sessionMode = "daily";
@@ -1791,20 +1809,18 @@ function showWelcome(focusStart) {
   studyStage.style.display = "none";
   dayMeta.classList.remove("on");
   backHomeBtn.classList.remove("on");
-  exitStarSession(shownFromStar);
+  exitReviewSession(shownFromReview);
   const plan = buildDayPlan();
-  const dueN = plan.filter(t => t.type === "review").length;
-  const newN = plan.filter(t => t.type === "new").length;
+  const newN = plan.length;
   const book = books.find(b => b.id === activeBookId) || books[0];
-  document.getElementById("heroPill").textContent = `${book ? book.name : "词书"} · 每日 ${newPerDay()} 词 · 间隔重复`;
+  document.getElementById("heroPill").textContent = `${book ? book.name : "词书"} · 每日 ${newPerDay()} 词 · 按天复习`;
   document.getElementById("previewTotal").textContent = WORDS.length;
   document.getElementById("previewDone").textContent = WORDS.filter(w => progress[w.word]).length;
   document.getElementById("previewStreak").textContent = state.streak;
-  document.getElementById("previewDue").textContent = dueN;
+  document.getElementById("previewDue").textContent = dueReviewWords().length;
   document.getElementById("previewNew").textContent = newN;
   const btn = document.getElementById("btnStart");
-  const noTask = plan.length === 0;
-  btn.firstChild.textContent = noTask ? "今日任务已完成" : (dueN > 0 ? `开始 · ${dueN} 个复习 + ${newN} 个新词` : "开始背单词");
+  btn.firstChild.textContent = newN === 0 ? "今日任务已完成" : `开始 · ${newN} 个新词`;
   if (focusStart !== false) setTimeout(() => btn.focus(), 100);
   updateStarButtons();
 }
@@ -1816,31 +1832,44 @@ function showStudy() {
   buildQueue();
   render();
   if (phase === "self" && interacted) {
-    const nw = wordMap.get(queue[cur].word);
+    const nw = entryOf(queue[cur].word);
     if (nw) setTimeout(() => speak(nw.word, false), 400);
   }
 }
-/* 生词本测试入口：从首页/统计页记录来源，返回时正确还原 */
-let shownFromStar = false;
-function showStarStudy() {
-  const n = starWords().length;
-  if (!n) return;
-  if (!confirm(`开始生词本测试？共 ${n} 个生词，每组最多 ${BATCH} 个，测完可继续下一组。`)) return;
-  shownFromStar = true;
+/* 复习会话（生词本测试 / 按天复习）入口：记录来源，返回时正确还原 */
+let shownFromReview = false;
+function enterReviewStage() {
+  shownFromReview = true;
   welcomeStage.style.display = "none";
   studyStage.style.display = "flex";
   dayMeta.classList.add("on");
   backHomeBtn.classList.add("on");
-  buildStarQueue();
   render();
   if (phase === "self" && interacted) {
-    const nw = wordMap.get(queue[cur].word);
+    const nw = entryOf(queue[cur].word);
     if (nw) setTimeout(() => speak(nw.word, false), 400);
   }
 }
-function exitStarSession(fromStar) {
-  if (!fromStar) return;
-  shownFromStar = false;
+function showStarStudy() {
+  const n = starWords().length;
+  if (!n) return;
+  if (!confirm(`开始生词本测试？共 ${n} 个生词，每组最多 ${BATCH} 个，测完可继续下一组。`)) return;
+  buildStarQueue();
+  enterReviewStage();
+}
+/* 按天复习：复习某一天记录的全部单词 */
+function startDayReview(date) {
+  const words = dayLogWords(date);
+  if (!words.length) { alert("这一天的记录里没有可复习的单词。"); return; }
+  dayReviewDate = date;
+  dayPool = [];
+  closeProfile();
+  buildDayQueue();
+  enterReviewStage();
+}
+function exitReviewSession(fromReview) {
+  if (!fromReview) return;
+  shownFromReview = false;
   sessionMode = "daily";   // 回到首页时恢复日常上下文，首页数据走 showWelcome 重算
 }
 document.getElementById("btnStart").addEventListener("click", () => {
@@ -1859,7 +1888,7 @@ btnStarTestHero.addEventListener("click", showStarStudy);
 btnStarTestPanel.addEventListener("click", showStarStudy);
 backHomeBtn.addEventListener("click", () => {
   speechSynthesis.cancel();
-  sessionMode = "daily";   // 学习中途返回：放弃生词本模式，恢复日常队列
+  sessionMode = "daily";   // 学习中途返回：放弃当前会话模式，恢复日常队列
   showWelcome();
 });
 document.getElementById("brandHome").addEventListener("click", e => {
@@ -1926,6 +1955,7 @@ function openProfile() {
   renderBookList();
   updateAccentUI();
   renderStarList();
+  renderDayLog();
   closeWordList();
   profilePanel.classList.add("open");
   profileOverlay.classList.add("open");
@@ -1951,6 +1981,8 @@ function findEntryAnywhere(word) {
   }
   return null;
 }
+/* 学习卡渲染统一取词条：当前词书优先，回退到其他词书（按天复习可能跨词书） */
+function entryOf(word) { return wordMap.get(word) || findEntryAnywhere(word); }
 function entryMean(w) {
   if (!w) return "";
   const s = getSenses(w)[0];
@@ -2056,6 +2088,36 @@ for (const [id, kind] of [["statTotalBox", "total"], ["statUnlearnedBox", "unlea
   el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openWordList(kind); } });
 }
 document.getElementById("wlBack").addEventListener("click", closeWordList);
+
+/* ---- 按天复习：每日学习记录列表，点选某一天开始复习 ---- */
+function renderDayLog() {
+  const body = document.getElementById("dayLogBody");
+  const dates = dayLogDates();
+  if (!dates.length) {
+    body.innerHTML = `<div class="wl-empty">还没有学习记录。<br>每天学过的词会自动记在这里，可按天回顾。</div>`;
+    return;
+  }
+  body.innerHTML = dates.map(d => {
+    const n = dayLogWords(d).length;
+    return `<div class="wl-item day-item" role="button" tabindex="0" data-day="${esc(d)}" aria-label="复习 ${esc(fmtDayLabel(d))} 的 ${n} 个单词">
+      <span class="day-date">${esc(fmtDayLabel(d))}</span>
+      <span class="wl-mean"></span>
+      <span class="wl-badge">${n} 词</span>
+      <span class="wl-badge go">复习</span>
+    </div>`;
+  }).join("");
+}
+document.getElementById("dayLogBody").addEventListener("click", e => {
+  const item = e.target.closest("[data-day]");
+  if (item) startDayReview(item.dataset.day);
+});
+document.getElementById("dayLogBody").addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const item = e.target.closest("[data-day]");
+  if (!item) return;
+  e.preventDefault();
+  startDayReview(item.dataset.day);
+});
 
 /* ---- 生词本管理列表：查看 / 单个移除 / 清空；不主动清除则一直保留 ---- */
 function renderStarList() {
@@ -9607,10 +9669,11 @@ async function confirmImport() {
 /* ================= 备份导出 / 导入 ================= */
 document.getElementById("btnExportAll").addEventListener("click", async () => {
   const data = {
-    v: 2, exportedAt: new Date().toISOString(),
+    v: 3, exportedAt: new Date().toISOString(),
     books,
     progress: Object.keys(progress).map(w => ({ word: w, ...progress[w] })),
     starred: starWords().map(w => ({ word: w, addAt: starred[w].addAt })),
+    dailyLog,
     state, settings, activeBookId
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -9661,6 +9724,8 @@ document.getElementById("fileBackup").addEventListener("change", e => {
           await dbPut("star", { word: s.word, ...starred[s.word] });
         }
       }
+      dailyLog = data.dailyLog && typeof data.dailyLog === "object" ? data.dailyLog : {};
+      await dbPut("meta", { k: "dailyLog", v: dailyLog });
       state = data.state || { date: todayStr(), todayLearned: [], todayNew: 0, stats: { known: 0, recalled: 0, revealed: 0, easy: 0 }, firstDate: todayStr(), lastDate: todayStr(), streak: 1 };
       settings = Object.assign({ accent: "gb", dailyNew: 10, ttsEngine: "online" }, data.settings || {});
       await dbPut("meta", { k: "state", v: state });
@@ -9730,35 +9795,26 @@ const PHASE_LABEL = {
   reveal: "答案揭晓", detail: "单词详情"
 };
 
-function nextDueInfo() {
-  let min = Infinity;
-  for (const w of WORDS) {
-    const p = progress[w.word];
-    if (p) min = Math.min(min, p.due);
-  }
-  if (min === Infinity) return null;
-  const ms = min - Date.now();
-  if (ms <= 0) return "现在";
-  if (ms < 3600e3) return Math.round(ms / 60e3) + " 分钟后";
-  if (ms < 864e5) return Math.round(ms / 3600e3) + " 小时后";
-  return Math.round(ms / 864e5) + " 天后";
-}
-
-/* 生词本测试的完成页：本组小计 + 生词本规模与入口，避免与每日任务口径混淆 */
-function renderStarDone() {
+/* 复习会话（生词本测试 / 按天复习）的完成页：本组小计 + 规模与继续入口 */
+function renderReviewDone() {
   const answered = state.stats.known + state.stats.recalled + state.stats.revealed;
   const acc = answered ? Math.round((state.stats.known + state.stats.recalled) / answered * 100) : 0;
+  const isStar = sessionMode === "star";
+  const totalN = isStar ? starWords().length : dayLogWords(dayReviewDate).length;
+  const hasMore = isStar ? starWords().length > 0 : dayLogWords(dayReviewDate).length > 0;
   cardEl.innerHTML = `
   <div class="done-card">
     <div class="done-mark">${ICON_CHECK}</div>
-    <div class="done-title">生词本测试完成</div>
-    <div class="done-sub">生词本共 ${starWords().length} 个词，日常学习中会低频巩固。可再来一组或回到首页。</div>
+    <div class="done-title">${isStar ? "生词本测试完成" : "按天复习完成"}</div>
+    <div class="done-sub">${isStar
+      ? `生词本共 ${totalN} 个词，可随时回来重测。`
+      : `${fmtDayLabel(dayReviewDate)} 记录 ${totalN} 个词，可继续下一组或回到首页。`}</div>
     <div class="stat-grid">
       <div class="stat-cell"><div class="stat-num">${acc}%</div><div class="stat-label">本轮正确率</div></div>
-      <div class="stat-cell"><div class="stat-num">${starWords().length}</div><div class="stat-label">生词本词汇</div></div>
+      <div class="stat-cell"><div class="stat-num">${totalN}</div><div class="stat-label">${isStar ? "生词本词汇" : "该日单词"}</div></div>
     </div>
     <div class="done-actions">
-      ${starWords().length ? `<button class="btn btn-primary" data-act="nextBatch">再测一组</button>` : ""}
+      ${hasMore ? `<button class="btn btn-primary" data-act="nextBatch">再测一组</button>` : ""}
       <button class="btn btn-ghost" data-act="backHome">回到首页</button>
     </div>
   </div>`;
@@ -9766,23 +9822,22 @@ function renderStarDone() {
 
 function render() {
   if (phase === "done") {
-    if (sessionMode === "star") { renderStarDone(); renderTop(); return; }
+    if (sessionMode !== "daily") { renderReviewDone(); renderTop(); return; }
     const left = dayPlanLeft();
     const allDone = WORDS.every(w => progress[w.word]) && left === 0;
     const bonusAvail = left === 0 && WORDS.some(w => !progress[w.word]);
-    const nextDue = nextDueInfo();
     cardEl.innerHTML = `
     <div class="done-card">
       <div class="done-mark">${ICON_CHECK}</div>
       <div class="done-title">${left > 0 ? "这一组完成" : "今日任务完成"}</div>
-      <div class="done-sub">${left > 0 ? `今日还剩 ${left} 个词，随时继续。` : bonusAvail ? "今日计划已完成，还可以加学一组新词，或休息。" : "新词配额已用完，到期词都清空了。休息吧。"}</div>
+      <div class="done-sub">${left > 0 ? `今日还剩 ${left} 个新词，随时继续。` : bonusAvail ? "今日计划已完成，还可以加学一组新词，或休息。" : "今日新词配额已用完，休息吧。"}</div>
       <div class="stat-grid">
         <div class="stat-cell"><div class="stat-num">${state.stats.known}</div><div class="stat-label">一眼认识</div></div>
         <div class="stat-cell"><div class="stat-num">${state.stats.recalled}</div><div class="stat-label">提示后想起</div></div>
         <div class="stat-cell"><div class="stat-num">${state.stats.revealed}</div><div class="stat-label">没想起来</div></div>
         <div class="stat-cell"><div class="stat-num">${state.stats.easy}</div><div class="stat-label">太简单</div></div>
       </div>
-      ${nextDue ? `<p class="next-review">最早一批复习 · <b>${nextDue}</b></p>` : ""}
+      <p class="next-review">复习已学单词 · 个人中心 → <b>按天复习</b></p>
       <div class="done-actions">
         ${left > 0 ? `<button class="btn btn-primary" data-act="nextBatch">再来一组</button>`
                   : bonusAvail ? `<button class="btn btn-primary" data-act="nextBatch">加学一组</button>`
@@ -9795,7 +9850,7 @@ function render() {
   }
 
   const t = queue[cur];
-  const w = wordMap.get(t.word);
+  const w = entryOf(t.word);
   const isReview = t.type === "review";
   let inner = "", actions = "", kbd = "", corner = "";
 
@@ -9898,7 +9953,6 @@ function render() {
               ${w.exampleCn ? `<div class="sentence-cn">${esc(w.exampleCn)}</div>` : ""}
             </div>
           </div>` : ""}
-          <p class="next-review">下次复习 · <b>${previewNext(pendingKind || "revealed", t.word)}</b></p>
         </div>`;
       actions = `<button class="btn btn-primary" data-act="next">记住了，下一个</button>`;
       kbd = `<div class="kbd-hint">按 <kbd>Enter</kbd> 下一个单词</div>`;
@@ -9916,7 +9970,7 @@ function render() {
   cardEl.innerHTML = `
     ${corner}
     <span class="stage-chip">${phase === "self" ? (isReview ? PHASE_LABEL.selfReview : PHASE_LABEL.selfNew) : PHASE_LABEL[phase]}</span>
-    ${starred[t.word] ? `<span class="star-chip">生词本${sessionMode === "star" ? '<span class="retest-note"> · 独立重测</span>' : ""}</span>` : ""}
+    ${starred[t.word] ? `<span class="star-chip">生词本${sessionMode === "star" ? '<span class="retest-note"> · 独立重测</span>' : sessionMode === "day" ? '<span class="retest-note"> · 按天复习</span>' : ""}</span>` : ""}
     ${inner}
     ${phase === "self" ? actions : `<div class="actions">${actions}</div>`}
     ${kbd}`;
@@ -9926,11 +9980,19 @@ function render() {
   if (primary) primary.focus({ preventScroll: true });
 }
 
+function fmtDayLabel(date) {
+  const parts = date.split("-").map(Number);
+  const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+  const wk = "日一二三四五六"[dt.getDay()];
+  const prefix = date === todayStr() ? "今天 · " : date === yesterdayStr() ? "昨天 · " : "";
+  return `${prefix}${parts[1]} 月 ${parts[2]} 日 · 周${wk}`;
+}
 function renderTop() {
-  const inStar = sessionMode === "star";
   const wrap = document.getElementById("dayNumWrap");
-  if (inStar) {
+  if (sessionMode === "star") {
     wrap.textContent = `生词本测试 · ${starWords().length} 词`;
+  } else if (sessionMode === "day") {
+    wrap.textContent = `按天复习 · ${fmtDayLabel(dayReviewDate)} · ${dayLogWords(dayReviewDate).length} 词`;
   } else {
     wrap.innerHTML = `今日已学 <b id="dayNum">${state.todayLearned.length}</b> 词`;
   }
@@ -9944,24 +10006,22 @@ function renderTop() {
 /* ================= 状态迁移 ================= */
 function finishWord(kind) {
   const t = queue[cur];
-  const p = applyResult(t.word, kind);
-  if (sessionMode !== "star") {           // 生词本测试不占每日配额与今日学习记录
+  applyResult(t.word, kind);
+  if (sessionMode === "daily") {          // 复习会话（生词本/按天）不占每日配额与当日记录
     if (t.type === "new") state.todayNew++;
-    state.todayLearned.push(t.word);
+    if (!state.todayLearned.includes(t.word)) state.todayLearned.push(t.word);
+    logDailyWord(t.word);
   }
   state.stats[kind] = (state.stats[kind] || 0) + 1;
   saveState();
-  if (kind === "revealed" && !t.requeued && p.due - Date.now() < 864e5) {
-    queue.push({ word: t.word, type: t.type, requeued: true });
-  }
-  cur++;
+  cur++;                                   // 出现过的词不再回到队列（无同轮重现）
   pendingKind = null;
   misjudged = false;
   if (cur >= queue.length) phase = "done";
   else phase = "self";
   render();
   if (phase === "self" && interacted) {
-    const nw = wordMap.get(queue[cur].word);
+    const nw = entryOf(queue[cur].word);
     if (nw) setTimeout(() => speak(nw.word, false), 350);
   }
 }
@@ -9976,7 +10036,9 @@ async function restartBook() {
   state.todayLearned = [];
   state.todayNew = 0;
   saveState();
-  if (sessionMode === "star") buildStarQueue(); else buildQueue();
+  if (sessionMode === "star") buildStarQueue();
+  else if (sessionMode === "day") buildDayQueue();
+  else buildQueue();
   render();
 }
 
@@ -9992,15 +10054,15 @@ function handle(act) {
     case "detail":  pendingKind = "revealed"; phase = "detail"; render(); break;
     case "misjudge": starCaptureCurrent(); pendingKind = "revealed"; misjudged = true; render(); break;
     case "next":    finishWord(pendingKind || "revealed"); break;
-    case "nextBatch": sessionMode === "star" ? buildStarQueue() : buildQueue(true); render(); break;
-    case "backHome": exitStarSession(shownFromStar); showWelcome(); break;
+    case "nextBatch": sessionMode === "star" ? buildStarQueue() : sessionMode === "day" ? buildDayQueue() : buildQueue(true); render(); break;
+    case "backHome": exitReviewSession(shownFromReview); showWelcome(); break;
     case "restart": restartBook(); break;
   }
 }
 
-/* 自评「不认识/忘了」→ 生词本捕获（首次出现，之前从未轮到过的词） */
+/* 自评「不认识/忘了」→ 生词本捕获（仅日常会话的首次出现；复习会话不重复登记） */
 function starCaptureCurrent() {
-  if (sessionMode === "star") return;                 // 生词本测试内不再重复登记
+  if (sessionMode !== "daily") return;
   const t = queue[cur];
   if (!t) return;
   if (progress[t.word] || state.todayLearned.includes(t.word)) return;  // 只捕获首次出现的词
@@ -10081,6 +10143,12 @@ document.addEventListener("keydown", e => {
   const starRows = await dbAll("star");
   starred = {};
   for (const row of starRows) starred[row.word] = { addAt: row.addAt || 0 };
+  dailyLog = metaMap.get("dailyLog") || {};
+  if (state.todayLearned && state.todayLearned.length && !dailyLog[state.date]) {
+    // 老数据补录：把今日已学并入每日记录
+    dailyLog[state.date] = state.todayLearned.slice();
+    await dbPut("meta", { k: "dailyLog", v: dailyLog });
+  }
   await migrateFromM3();
   rolloverIfNeeded();
   const savedActive = metaMap.get("activeBookId");
