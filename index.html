@@ -1072,6 +1072,9 @@ button:focus-visible, a:focus-visible {
 .lib-meta { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
 .lib-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .lib-empty { text-align: center; padding: 22px 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.7; }
+.ocr-lang { width: auto; min-height: 42px; border-radius: 999px; border: 1px solid var(--line-2); background: #fff; padding: 0 12px; font-family: var(--sans); font-size: 13px; color: var(--ink); cursor: pointer; }
+.video-tools .ocr-lang { flex: 0 0 auto; }
+.video-progress { font-size: 12px; color: var(--green); align-self: center; }
 .dub-panel { margin-top: 14px; padding: 14px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--cream); }
 .dub-panel[hidden] { display: none; }
 .dub-line { margin-bottom: 10px; font-size: 14px; line-height: 1.7; color: var(--ink); }
@@ -1302,6 +1305,13 @@ button:focus-visible, a:focus-visible {
         <button class="mini-btn" id="btnPickSub">导入字幕</button>
         <button class="mini-btn" id="btnLinkImport" aria-expanded="false">链接导入</button>
         <button class="mini-btn" id="btnLibToggle" aria-expanded="false">视频库</button>
+        <button class="mini-btn" id="btnOcr">识别硬字幕</button>
+        <select id="ocrLang" class="ocr-lang" aria-label="字幕语言" title="画面中字幕的语言">
+          <option value="eng">英文</option>
+          <option value="chi_sim">中文</option>
+          <option value="chi_sim+eng">中英混合（语言包较大）</option>
+        </select>
+        <span class="video-progress" id="ocrProgress"></span>
       </div>
       <div class="link-panel" id="libPanel" hidden>
         <div class="wl-scroll" id="libBody"></div>
@@ -10641,6 +10651,189 @@ document.getElementById("libBody").addEventListener("click", async e => {
     renderVideoLib();
   }
 });
+
+/* ---- 硬字幕识别（OCR）：抽帧 + Tesseract.js，识别画面下方的字幕条 ----
+   策略：每 0.5s 左右抽一帧，先做像素变化检测（字幕带），画面变了才 OCR；
+   相邻识别结果相同则合并为一条字幕。首次使用需联网下载引擎与语言包。 */
+let ocrWorker = null, ocrWorkerLang = "", ocrStop = false, ocrBusy = false, tesseractLoading = null;
+function setOcrProgress(text) { document.getElementById("ocrProgress").textContent = text || ""; }
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  if (tesseractLoading) return tesseractLoading;
+  tesseractLoading = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    s.onload = resolve;
+    s.onerror = () => { tesseractLoading = null; reject(new Error("OCR 引擎脚本加载失败（需联网访问 CDN）")); };
+    document.head.appendChild(s);
+  });
+  return tesseractLoading;
+}
+function seekTo(t) {
+  return new Promise(resolve => {
+    const target = Math.max(0, Math.min(t, (videoEl.duration || 0) - 0.05));
+    if (Math.abs(videoEl.currentTime - target) < 0.01) { resolve(); return; }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      // seeked 之后等两帧再 resolve，否则 drawImage 可能拿到上一位置的画面
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    };
+    const timer = setTimeout(finish, 2500);
+    videoEl.addEventListener("seeked", finish);
+    videoEl.currentTime = target;
+  });
+}
+function cleanOcrText(t) {
+  let s = String(t || "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  if ((s.match(/[\u4e00-\u9fff]/g) || []).length >= 2) s = s.replace(/ /g, "");
+  return s.replace(/^[-–—•·]+/, "").trim();
+}
+function levRatio(a, b) {
+  const m = a.length, n = b.length;
+  if (!m || !n) return 0;
+  let prev = new Array(n + 1), cur = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= n; j++) prev[j] = cur[j];
+  }
+  return 1 - prev[n] / Math.max(m, n);
+}
+function sameLine(a, b) {
+  const norm = s => String(s).toLowerCase().replace(/[^\u4e00-\u9fff\w]+/g, "");
+  const x = norm(a), y = norm(b);
+  if (!x || !y) return false;
+  return x === y || levRatio(x, y) >= 0.82;
+}
+let ocrStartAt = 0;
+document.getElementById("btnOcr").addEventListener("click", () => {
+  if (ocrBusy) {
+    if (Date.now() - ocrStartAt > 800) ocrStop = true;   // 启动瞬间的重复事件不当作「停止」
+    return;
+  }
+  runOcr();
+});
+async function runOcr() {
+  if (!videoEl.src) { setVideoHint("请先导入视频（本地文件、拖拽或链接）再识别硬字幕。"); return; }
+  if (!videoEl.duration || !isFinite(videoEl.duration)) { setVideoHint("视频还在加载中，等几秒再识别。"); return; }
+  ocrBusy = true; ocrStop = false;
+  ocrStartAt = Date.now();
+  const btn = document.getElementById("btnOcr");
+  btn.textContent = "停止识别";
+  const lang = document.getElementById("ocrLang").value;
+  const prevTime = videoEl.currentTime;
+  const wasPlaying = !videoEl.paused;
+  if (wasPlaying) videoEl.pause();
+  try {
+    setOcrProgress("加载引擎…");
+    await loadTesseract();
+    if (!ocrWorker || ocrWorkerLang !== lang) {
+      if (ocrWorker) { try { await ocrWorker.terminate(); } catch (e) { /* 忽略 */ } ocrWorker = null; }
+      ocrWorker = await Tesseract.createWorker(lang, 1, { logger: m => {
+        if (m && typeof m.progress === "number" && String(m.status || "").indexOf("recognizing") === -1) {
+          setOcrProgress("语言包 " + Math.round(m.progress * 100) + "%");
+        }
+      } });
+      ocrWorkerLang = lang;
+      await ocrWorker.setParameters({ tessedit_pageseg_mode: "6" });
+    }
+    const dur = videoEl.duration;
+    const interval = Math.max(0.5, dur / 600);
+    const W = 640;
+    const H = Math.max(120, Math.round(W * videoEl.videoHeight / Math.max(1, videoEl.videoWidth)) || 360);
+    const work = document.createElement("canvas"); work.width = W; work.height = H;
+    const wctx = work.getContext("2d", { willReadFrequently: true });
+    const bandY = Math.round(H * 0.66), bandH = H - bandY;
+    const diffC = document.createElement("canvas"); diffC.width = 128; diffC.height = 32;
+    const dctx = diffC.getContext("2d", { willReadFrequently: true });
+    const ocrC = document.createElement("canvas"); ocrC.width = W * 2; ocrC.height = bandH * 2;
+    const octx = ocrC.getContext("2d", { willReadFrequently: true });
+    let prevGray = null, lastOcrAt = -99, prevT = 0;
+    const found = [];
+    let cur = null, done = 0;
+    const samples = [];
+    for (let t = 0.05; t < dur - 0.05; t += interval) samples.push(t);
+    for (const t of samples) {
+      if (ocrStop) break;
+      await seekTo(t);
+      wctx.drawImage(videoEl, 0, 0, W, H);
+      dctx.drawImage(work, 0, bandY, W, bandH, 0, 0, 128, 32);
+      const px = dctx.getImageData(0, 0, 128, 32).data;
+      const gray = new Float32Array(128 * 32);
+      let changedPx = 0;
+      for (let i = 0; i < gray.length; i++) {
+        const v = px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114;
+        gray[i] = v;
+      }
+      if (prevGray) {
+        for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prevGray[i]) > 25) changedPx++;
+      }
+      prevGray = gray;
+      done++;
+      setOcrProgress("扫描 " + Math.round(done / samples.length * 100) + "% · 已得 " + (found.length + (cur ? 1 : 0)) + " 句");
+      // 字幕条变化（变化像素多）或距上次识别较久（兜底）才 OCR；静止画面直接跳过
+      const mid = (prevT + t) / 2;   // 上次采样与本次采样的中点≈字幕真实切换时刻
+      if (prevGray && changedPx < 25 && t - lastOcrAt < 2) { prevT = t; continue; }
+      lastOcrAt = t;
+      octx.drawImage(work, 0, bandY, W, bandH, 0, 0, ocrC.width, ocrC.height);
+      // 预处理：灰度化；若整体偏暗（深底浅字）则反相成浅底深字，Tesseract 才好认
+      const img = octx.getImageData(0, 0, ocrC.width, ocrC.height);
+      const dd = img.data;
+      let lum = 0;
+      for (let i = 0; i < dd.length; i += 4) {
+        const v = dd[i] * 0.299 + dd[i + 1] * 0.587 + dd[i + 2] * 0.114;
+        dd[i] = dd[i + 1] = dd[i + 2] = v; lum += v;
+      }
+      const meanLum = lum / (dd.length / 4);
+      if (meanLum < 128) for (let i = 0; i < dd.length; i += 4) dd[i] = dd[i + 1] = dd[i + 2] = 255 - dd[i];
+      octx.putImageData(img, 0, 0);
+      const res = await ocrWorker.recognize(ocrC);
+      const text = cleanOcrText(res.data.text);
+      if (text) {
+        if (cur && sameLine(cur.text, text)) { /* 同一句继续 */ }
+        else {
+          if (cur) { cur.end = mid; found.push(cur); }     // 字幕切换：上一句在中点结束
+          cur = { start: Math.max(0, mid), end: Math.min(dur, t + interval), text };
+        }
+      } else if (cur) {
+        cur.end = mid; found.push(cur); cur = null;        // 字幕消失（区域内无文字）
+      }
+      prevT = t;
+    }
+    if (cur) { cur.end = Math.min(dur, prevT + interval / 2); found.push(cur); }
+    const merged = [];
+    for (const c of found) {
+      const last = merged[merged.length - 1];
+      if (last && c.start - last.end < 0.7 && sameLine(last.text, c.text)) { last.end = c.end; continue; }
+      merged.push(c);
+    }
+    const list = merged.filter(c => c.end - c.start >= 0.6);
+    await seekTo(prevTime);
+    if (list.length) {
+      cues = list; cueIdx = -1; selIdx = -1; renderSubList();
+      selectCue(0);
+      setVideoHint(`已从画面识别出 ${list.length} 条硬字幕（OCR 可能有小误差，可在列表里核对），可直接跟读评分；也可导入精确字幕覆盖。`);
+      setOcrProgress(`识别完成 · ${list.length} 句`);
+    } else {
+      setVideoHint("没有识别到字幕：确认画面下方有清晰字幕、语言选择正确；也可直接导入 .srt / .vtt 字幕文件。");
+      setOcrProgress("未识别到字幕");
+    }
+  } catch (err) {
+    setOcrProgress("");
+    setVideoHint("识别失败：" + (err && err.message ? err.message : "未知错误") + "。首次使用需联网下载 OCR 引擎与语言包。");
+  } finally {
+    ocrBusy = false;
+    btn.textContent = "识别硬字幕";
+    if (wasPlaying && !ocrStop) videoEl.play().catch(() => {});
+  }
+}
 
 /* ================= 演示工具 ================= */
 document.getElementById("demoTomorrow").addEventListener("click", async () => {
