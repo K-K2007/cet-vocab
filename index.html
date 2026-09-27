@@ -10302,12 +10302,23 @@ async function startRecording() {
     showDubResult("当前浏览器不支持录音（需要麦克风权限支持）。");
     return;
   }
+  if (/MicroMessenger|MQQBrowser/i.test(navigator.userAgent)) {
+    showDubResult("微信/QQ 内置浏览器不开放麦克风：请点右上角「…」选择「在浏览器打开」，用系统浏览器录音。");
+    return;
+  }
+  if (window.isSecureContext === false) {
+    showDubResult("手机浏览器在 http 页面会禁用麦克风：请用 https 地址打开（如线上站点），或改用电脑练习。");
+    return;
+  }
   stopVideoSpeech();
   if (!videoEl.paused) videoEl.pause();
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
-    showDubResult("无法访问麦克风：请允许麦克风权限（页面需 https 或 localhost 打开）。");
+    const why = err && err.name === "NotFoundError" ? "未检测到麦克风设备，请检查系统输入设备。"
+      : err && err.name === "NotAllowedError" ? "麦克风权限被拒绝：请在浏览器站点设置里允许本页使用麦克风，然后重试。"
+      : "无法访问麦克风：请允许麦克风权限（页面需 https 或 localhost 打开）。";
+    showDubResult(why);
     return;
   }
   recChunks = [];
@@ -10315,13 +10326,13 @@ async function startRecording() {
   recCancelled = false;
   mediaRecorder = typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm")
     ? new MediaRecorder(micStream, { mimeType: "audio/webm" })
-    : new MediaRecorder(micStream);
+    : new MediaRecorder(micStream);   // iOS Safari 等不支持 webm 时用默认容器（mp4/aac），评分端按内容解码
   mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
   mediaRecorder.onstop = () => {
     if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
     document.getElementById("btnRecord").textContent = "录音跟读";
     if (recCancelled || !recChunks.length) { recCancelled = false; return; }
-    scoreRecording(new Blob(recChunks, { type: "audio/webm" }), recIdx);
+    scoreRecording(new Blob(recChunks, { type: mediaRecorder.mimeType || "audio/webm" }), recIdx);
   };
   mediaRecorder.start();
   document.getElementById("btnRecord").textContent = "停止录音";
