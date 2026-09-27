@@ -3,15 +3,22 @@
 # 用 cnbcool/webhook 插件通知 EdgeOne 拉取并部署 —— CNB 没有原生 webhook，
 # 官方要求用这个插件把 push 事件告诉 Makers。
 #
-# 注意：这条链路要生效，必须在 EdgeOne 控制台开启「自动部署」开关：
-#   项目设置 → 环境管理 → 生产环境操作列「编辑」→ 自动部署 打开
-# 该开关关闭时，webhook 请求会被接受并返回 200/ok，但不会新建任何部署
-#（2026-09-27 排查确认的根因）。关闭状态下无论推多少次，站点都不会更新。
+# ⚠️ 地址末尾的 ?site=intl 是必须的，不要删。
 #
-# 另外两种方式都不适用于本项目，别再走：
-#   - edgeone makers deploy：只支持 Provider 为 'Upload' 的项目，本项目是从
-#     CNB 导入的 Provider 'Cnb' 项目，CLI 会直接报错退出。
-#   - 部署钩子：控制台里找不到入口（文档的「项目设置」模块列表里也没有它）。
+# 本项目 cet-vocab 在国际站（area = overseas，默认域名 cet-vocab.edgeone.dev）。
+# 漏掉 ?site=intl 时请求会发到国内站，那边没有这个项目，但**依然返回
+# 200/{"code":0,"message":"ok"}，然后什么都不做** —— 表现为推送后站点永远不更新，
+# 而 CNB 构建状态、webhook 响应、控制台都显示"正常"，极难排查。
+# 2026-09-27 通过 Makers SDK 列项目才定位到（同一个 token 在 china 区域直接报
+# "The Token usage region is incorrect"）。
+#
+# 这条链路生效还需要控制台里「自动部署」是打开的：
+#   项目设置 → 环境管理 → 生产环境操作列「编辑」→ 自动部署
+#
+# 另一种方式不适用，别再走：
+#   edgeone makers deploy 只支持 Provider 为 'Upload' 的项目，本项目是从 CNB
+#   导入的 Provider 'Cnb' 项目，CLI 会直接报错：
+#   "Project cet-vocab exists but has Provider 'Cnb'..."
 #
 # debug: true 会打印 webhook 的请求与响应，便于确认通知是否送达。
 main:
@@ -21,7 +28,7 @@ main:
           image: cnbcool/webhook
           settings:
             urls:
-              - https://api.edgeone.ai/eo/pages/hook/cnb
+              - https://api.edgeone.ai/eo/pages/hook/cnb?site=intl
             method: POST
             content_type: application/json
             debug: true
