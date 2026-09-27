@@ -3,3 +3,8 @@ node_modules/
 Thumbs.db
 *.log
 test/raw/
+
+test/key.pem
+test/cert.pem
+test/https_server.py
+test/site_check*
