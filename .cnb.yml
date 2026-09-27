@@ -1,19 +1,44 @@
-# 部署到 EdgeOne Makers（原 EdgeOne Pages）。
+# 部署到 EdgeOne Makers（原 EdgeOne Pages）——通过「部署钩子」触发。
 #
-# 这里用 CLI 部署而不是官方示例里的 webhook 插件：webhook 那条路会返回
-# 200/code:0/ok 但从不真正触发部署，失败也报成功，无法排查。CLI 部署的
-# 成败会真实反映在构建日志里。
+# 为什么不用另外两种方式：
 #
-# 本项目是无构建步骤的单文件静态站，所以直接把 index.html 拷进 dist 再部署，
-# 避免把 .git / test / DEPLOY.md 一起传上去。
+#  1. cnbcool/webhook 插件（官方示例模板那种）：它 POST 到
+#     api.edgeone.ai/eo/pages/hook/cnb，会返回 200/code:0/ok，但从不真正触发
+#     部署，失败也报成功。实测 2026-09-27 前后每次推送都是这样，站点一直没更新。
 #
-# EDGEONE_API_TOKEN 来自私有密钥仓库，不落在本仓库里（本仓库会同步到 GitHub 镜像）。
+#  2. edgeone CLI（edgeone makers deploy）：只支持 Provider 为 'Upload' 的项目，
+#     而 cet-vocab 是从 CNB 导入的 Provider 'Cnb' 项目，CLI 会直接报错退出。
+#
+# 部署钩子是每个项目独占的 URL，POST 一下就触发对应分支的部署，无需认证，
+# 且与项目类型无关。URL 属于凭据，放在私有密钥仓库里，不写进本仓库
+#（本仓库会同步到 GitHub 镜像）。
 main:
   push:
     - imports: https://cnb.cool/athundergame/ci-secrets/-/blob/main/envs.yml
       stages:
-        - name: Deploy to EdgeOne Makers
+        - name: Trigger EdgeOne deployment
           image: node:20
           script:
-            - mkdir -p dist && cp index.html dist/
-            - npx -y edgeone makers deploy dist -n cet-vocab -t $EDGEONE_API_TOKEN
+            - |
+              if [ -z "$EDGEONE_DEPLOY_HOOK" ]; then
+                echo "EDGEONE_DEPLOY_HOOK 未配置，无法触发部署。"
+                echo "请到 EdgeOne 控制台 → 项目 cet-vocab → 项目设置 → 部署钩子，"
+                echo "新建一个（分支选 main），再把得到的 URL 填进"
+                echo "ci-secrets 仓库的 envs.yml 后推送。"
+                exit 1
+              fi
+            - |
+              node -e '
+                const url = process.env.EDGEONE_DEPLOY_HOOK;
+                fetch(url, { method: "POST" })
+                  .then(async (r) => {
+                    const body = await r.text();
+                    console.log("HTTP", r.status);
+                    console.log(body.slice(0, 800));
+                    process.exit(r.ok ? 0 : 1);
+                  })
+                  .catch((e) => {
+                    console.error("请求部署钩子失败:", e.message);
+                    process.exit(1);
+                  });
+              '
