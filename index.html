@@ -1073,7 +1073,9 @@ button:focus-visible, a:focus-visible {
 .lib-meta { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
 .lib-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .lib-empty { text-align: center; padding: 22px 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.7; }
-.fit-report { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line-2); border-radius: 10px; font-size: 12.5px; color: var(--ink-2); line-height: 1.7; }
+.fit-report { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line-2); border-radius: 10px; font-size: 12.5px; color: var(--ink-2); line-height: 1.7; transition: padding .25s, font-size .25s; }
+.fit-report.collapsed { padding: 3px 12px; font-size: 11.5px; opacity: .8; }
+.fit-report.collapsed .fit-detail { display: none; }
 .fit-report b { font-family: var(--serif); font-size: 16px; color: var(--green); }
 .fit-report:empty { display: none; }
 .fit-warn { color: #b3563a; }
@@ -10822,17 +10824,30 @@ function renderFitReport() {
   const el = document.getElementById("fitReport");
   if (!el) return;
   if (!fitReport) { el.innerHTML = ""; return; }
+  const details = [];
+  if (fitReport.speech != null) details.push(`语音契合 ${fitReport.speech}%`);
+  if (fitReport.conf != null) details.push(`识别置信 ${fitReport.conf}%`);
   const parts = [`契合度 <b>${fitReport.overall}%</b>`];
-  if (fitReport.speech != null) parts.push(`语音契合 ${fitReport.speech}%`);
-  if (fitReport.conf != null) parts.push(`识别置信 ${fitReport.conf}%`);
-  if (fitReport.lowSet.size) parts.push(`<span class="fit-warn">${fitReport.lowSet.size} 句建议复核</span>`);
-  el.innerHTML = parts.join(" · ");
+  // 分隔符放在 span 内：折叠隐藏明细时不会残留孤立的「·」
+  if (details.length) parts.push(`<span class="fit-detail">· ${details.join(" · ")}</span>`);
+  if (fitReport.lowSet.size) parts.push(`<span class="fit-warn">· ${fitReport.lowSet.size} 句建议复核</span>`);
+  el.innerHTML = parts.join(" ");
 }
 document.getElementById("fitReport").addEventListener("click", () => {
   if (!fitReport || !fitReport.lowSet.size) return;
   const idx = cues.findIndex(c => fitReport.lowSet.has(cueKey(c)));
   if (idx >= 0) selectCue(idx);
 });
+/* 向下滑动时契合度栏折叠为紧凑条（保留总分与复核提示），向上滚或回顶展开 */
+let fitScrollLastY = 0, fitCollapsed = false;
+window.addEventListener("scroll", () => {
+  const y = window.scrollY, dy = y - fitScrollLastY;
+  fitScrollLastY = y;
+  const bar = document.getElementById("fitReport");
+  if (!bar || !fitReport) return;
+  if (!fitCollapsed && y > 80 && dy > 1) { fitCollapsed = true; bar.classList.add("collapsed"); }
+  else if (fitCollapsed && (dy < -2 || y < 40)) { fitCollapsed = false; bar.classList.remove("collapsed"); }
+}, { passive: true });
 let ocrStartAt = 0;
 document.getElementById("btnOcr").addEventListener("click", () => {
   if (ocrBusy) {
