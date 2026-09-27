@@ -10299,7 +10299,7 @@ async function startRecording() {
   if (!c) return;
   if (!refSamples) { showDubResult("视频原声未就绪，无法评分（先导入带音轨的视频）。"); return; }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
-    showDubResult("当前浏览器不支持录音（需要麦克风权限支持）。");
+    showDubResult("当前浏览器不支持录音：请改用系统浏览器（Edge / Chrome / Safari）打开；编辑器内置预览窗一般不开放麦克风。");
     return;
   }
   if (/MicroMessenger|MQQBrowser/i.test(navigator.userAgent)) {
@@ -10317,7 +10317,7 @@ async function startRecording() {
   } catch (err) {
     const why = err && err.name === "NotFoundError" ? "未检测到麦克风设备，请检查系统输入设备。"
       : err && err.name === "NotAllowedError" ? "麦克风权限被拒绝：请在浏览器站点设置里允许本页使用麦克风，然后重试。"
-      : "无法访问麦克风：请允许麦克风权限（页面需 https 或 localhost 打开）。";
+      : "无法访问麦克风：请允许权限（页面需 https 或 localhost）；若在编辑器内置预览/嵌入浏览器里，请换系统浏览器打开。";
     showDubResult(why);
     return;
   }
