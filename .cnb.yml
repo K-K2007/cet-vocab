@@ -1,25 +1,19 @@
+# 部署到 EdgeOne Makers（原 EdgeOne Pages）。
+#
+# 这里用 CLI 部署而不是官方示例里的 webhook 插件：webhook 那条路会返回
+# 200/code:0/ok 但从不真正触发部署，失败也报成功，无法排查。CLI 部署的
+# 成败会真实反映在构建日志里。
+#
+# 本项目是无构建步骤的单文件静态站，所以直接把 index.html 拷进 dist 再部署，
+# 避免把 .git / test / DEPLOY.md 一起传上去。
+#
+# EDGEONE_API_TOKEN 来自私有密钥仓库，不落在本仓库里（本仓库会同步到 GitHub 镜像）。
 main:
   push:
-  - stages:
-    - name: notify
-      image: cnbcool/webhook
-      settings:
-        urls:
-          - https://api.edgeone.ai/eo/pages/hook/cnb
-        method: POST
-        content_type: application/json
-        debug: true
-        template: |
-          {
-            "repoName": "{{ CNB_REPO_NAME }}",
-            "repoUrl": "{{ CNB_REPO_URL_HTTPS }}",
-            "branch": "{{ CNB_BRANCH }}",
-            "commit": "{{ CNB_COMMIT_SHORT }}",
-            "commitMessage": "{{ CNB_COMMIT_MESSAGE }}",
-            "committer": "{{ CNB_COMMITTER }}",
-            "event": "{{ CNB_EVENT }}",
-            "buildId": "{{ CNB_BUILD_ID }}",
-            "buildWebUrl": "{{ CNB_BUILD_WEB_URL }}",
-            "buildUser": "{{ CNB_BUILD_USER }}",
-            "pipelineName": "{{ CNB_PIPELINE_NAME }}"
-          }
+    - imports: https://cnb.cool/athundergame/ci-secrets/-/blob/main/envs.yml
+      stages:
+        - name: Deploy to EdgeOne Makers
+          image: node:20
+          script:
+            - mkdir -p dist && cp index.html dist/
+            - npx -y edgeone makers deploy dist -n cet-vocab -t $EDGEONE_API_TOKEN
