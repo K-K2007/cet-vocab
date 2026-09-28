@@ -10,7 +10,7 @@
 
 ## 方式一：Git 仓库部署（推荐，自动更新）
 
-1. 将 `cet-vocab/` 目录作为仓库根（或把 `index.html` 放在仓库根目录）推送到 GitHub / Gitee / CODING 等平台。
+1. 将 `cet-vocab/` 目录作为仓库根（或把 `index.html` 放在仓库根目录）推送到 Git 仓库托管平台。主仓库为腾讯云 CNB（`https://cnb.cool/athundergame/cet`），GitHub 作为备用镜像。
 2. 打开 [EdgeOne Pages 控制台](https://console.cloud.tencent.com/edgeone/pages)，点击 **创建项目** → **导入 Git 仓库**。
 3. 授权并选择仓库后配置构建设置：
    - **框架预设**：`None`（纯静态）
