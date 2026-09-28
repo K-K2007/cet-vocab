@@ -10893,7 +10893,7 @@ async function runOcr() {
     }
     const dur = videoEl.duration;
     const interval = Math.max(0.5, dur / 600);
-    const W = 640;
+    const W = Math.min(960, Math.max(640, Math.round(videoEl.videoWidth) || 640));   // 高分辨率源用更大工作画布，小字幕更清晰
     const H = Math.max(120, Math.round(W * videoEl.videoHeight / Math.max(1, videoEl.videoWidth)) || 360);
     const work = document.createElement("canvas"); work.width = W; work.height = H;
     const wctx = work.getContext("2d", { willReadFrequently: true });
@@ -10904,6 +10904,9 @@ async function runOcr() {
     const dctx = diffC.getContext("2d", { willReadFrequently: true });
     const ocrC = document.createElement("canvas"); ocrC.width = bandW * 2; ocrC.height = bandH * 2;
     const octx = ocrC.getContext("2d", { willReadFrequently: true });
+    // 低置信行救援用：紧裁单行放大重识别
+    const lineC = document.createElement("canvas");
+    const lctx = lineC.getContext("2d", { willReadFrequently: true });
     let prevGray = null, lastOcrAt = -99, prevT = 0;
     const found = [];
     let cur = null, done = 0;
@@ -10933,6 +10936,7 @@ async function runOcr() {
       lastOcrAt = t;
       octx.drawImage(work, bandX, bandY, bandW, bandH, 0, 0, ocrC.width, ocrC.height);
       // 预处理：灰度化；若整体偏暗（深底浅字）则反相成浅底深字，Tesseract 才好认
+      // （实验过"背景均衡+对比度放大"：会同步放大纹理噪声干扰真词置信度，实测负优化，已撤）
       const img = octx.getImageData(0, 0, ocrC.width, ocrC.height);
       const dd = img.data;
       let lum = 0;
@@ -10954,6 +10958,7 @@ async function runOcr() {
             const words = line.words || [];
             const mixedCase = words.some(w => /[a-z]/.test(String(w.text || "")));
             const arr = [];
+            const lineConfArr = [];
             for (const w of words) {
               const t = String(w.text || "").trim();
               if (!t) continue;
@@ -10968,24 +10973,54 @@ async function runOcr() {
               // 混排行里的超长全大写串多为噪声；清晰的大写强调词置信度高，放行
               if (mixedCase && /^[A-Z]{6,}$/.test(t) && !(wc != null && wc >= 75)) continue;
               arr.push(t);
-              if (wc != null) keptConfs.push(wc);
+              if (wc != null) { keptConfs.push(wc); lineConfArr.push(wc); }
             }
             if (!arr.length) continue;
             if (arr.length >= 3 && /^[A-Z][a-z]$/.test(arr[arr.length - 1])) arr.pop();  // 句尾两字母碎片
             if (arr.length === 1 && /^[A-Z]{6,}$/.test(arr[0])) continue;                // 整行全大写串＝幻觉行
             const lineText = cleanOcrText(arr.join(" "));
-            if (lineText) lineTexts.push({ text: lineText, y: line.bbox ? line.bbox.y0 : 1e9 });
+            if (lineText) {
+              const lc = lineConfArr.length ? lineConfArr.reduce((a, b) => a + b, 0) / lineConfArr.length : null;
+              lineTexts.push({ text: lineText, y: line.bbox ? line.bbox.y0 : 1e9, conf: lc, bbox: line.bbox || null });
+            }
           }
         }
       }
+      // 低置信行救援：紧裁该行 3× 放大后按单行模式（PSM 7）重识别一次，置信更高才采纳
+      for (const L of lineTexts) {
+        if (L.conf == null || L.conf >= 65 || !L.bbox) continue;
+        const pad = 6;
+        const x0 = Math.max(0, L.bbox.x0 - pad), y0 = Math.max(0, L.bbox.y0 - pad);
+        const cw = Math.min(ocrC.width - x0, L.bbox.x1 - L.bbox.x0 + pad * 2), ch = Math.min(ocrC.height - y0, L.bbox.y1 - L.bbox.y0 + pad * 2);
+        if (cw < 8 || ch < 8) continue;
+        try {
+          lineC.width = cw * 3; lineC.height = ch * 3;
+          lctx.drawImage(ocrC, x0, y0, cw, ch, 0, 0, lineC.width, lineC.height);
+          await ocrWorker.setParameters({ tessedit_pageseg_mode: "7" });
+          const r2 = await ocrWorker.recognize(lineC, {}, { text: true });
+          await ocrWorker.setParameters({ tessedit_pageseg_mode: "6" });
+          const t2 = cleanOcrText(r2.data.text);
+          if (t2 && (r2.data.confidence || 0) > L.conf + 3) { L.text = t2; L.conf = r2.data.confidence; }
+        } catch (e) {
+          try { await ocrWorker.setParameters({ tessedit_pageseg_mode: "6" }); } catch (e2) { /* 忽略 */ }
+        }
+      }
       lineTexts.sort((a, b) => a.y - b.y);
-      const text = cleanOcrText(lineTexts.map(x => x.text).join(" "));
+      let text = cleanOcrText(lineTexts.map(x => x.text).join(" "));
+      // 拼接后再次检查句尾碎片：独立垃圾行的两字母大写开头残留（同句内规则管不到跨行拼接）
+      const toks = text ? text.split(" ") : [];
+      if (toks.length >= 3 && /^[A-Z][a-z]$/.test(toks[toks.length - 1])) toks.pop();
+      text = toks.join(" ");
       const imgConf = keptConfs.length ? Math.round(keptConfs.reduce((a, b) => a + b, 0) / keptConfs.length) : Math.round(res.data.confidence || 0);
       if (text) {
-        if (cur && sameLine(cur.text, text)) { cur.confs.push(imgConf); }
+        if (cur && sameLine(cur.text, text)) {
+          cur.confs.push(imgConf);
+          // 同一句会被多次识别，保留置信度更高的读数，减少偶发误读
+          if (imgConf > (cur.textConf || 0) + 3) { cur.text = text; cur.textConf = imgConf; }
+        }
         else {
           if (cur) { cur.end = mid; found.push(cur); }     // 字幕切换：上一句在中点结束
-          cur = { start: Math.max(0, mid), end: Math.min(dur, t + interval), text, confs: [imgConf] };
+          cur = { start: Math.max(0, mid), end: Math.min(dur, t + interval), text, confs: [imgConf], textConf: imgConf };
         }
       } else if (cur) {
         cur.end = mid; found.push(cur); cur = null;        // 字幕消失（区域内无文字）
