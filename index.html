@@ -10317,7 +10317,7 @@ async function startRecording() {
   } catch (err) {
     const why = err && err.name === "NotFoundError" ? "未检测到麦克风设备，请检查系统输入设备。"
       : err && err.name === "NotAllowedError" ? "麦克风权限被拒绝：请在浏览器站点设置里允许本页使用麦克风，然后重试。"
-      : "无法访问麦克风：请允许权限（页面需 https 或 localhost）；若在编辑器内置预览/嵌入浏览器里，请换系统浏览器打开。";
+      : "无法访问麦克风：请允许权限（页面需 https 或 localhost）；若在编辑器内置预览/嵌入浏览器里，请换系统浏览器打开。（" + (err && err.name || "未知") + "）";
     showDubResult(why);
     return;
   }
